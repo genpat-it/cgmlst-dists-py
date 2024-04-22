@@ -1,2 +1,8 @@
 validation/5000.tab filter=lfs diff=lfs merge=lfs -text
 test/5000.tab filter=lfs diff=lfs merge=lfs -text
+test/crc32.tab filter=lfs diff=lfs merge=lfs -text
+validation/crc32_c.tab filter=lfs diff=lfs merge=lfs -text
+validation/crc32_lower_py.tab filter=lfs diff=lfs merge=lfs -text
+validation/crc32_py.tab filter=lfs diff=lfs merge=lfs -text
+validation/crc32_upper_c.tab filter=lfs diff=lfs merge=lfs -text
+validation/crc32_upper_py.tab filter=lfs diff=lfs merge=lfs -text
