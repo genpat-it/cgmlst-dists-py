@@ -9,11 +9,11 @@ from numba import jit, prange, set_num_threads
 DEFAULT_THREADS = max(1, os.cpu_count() // 2 + 1)
 VERSION = "0.0.2"
 
-def load_data(file_path, input_sep="\t", crc32=False):
+def load_data(file_path, input_sep="\t", skip_input_replacements=False):
     """Load data from a TSV file."""
     try:
         data = pd.read_csv(file_path, sep=input_sep, index_col=0)
-        if not crc32:
+        if not skip_input_replacements:
             data = data.replace(r'INF-(\d+)', r'\1', regex=True)
             data = data.apply(pd.to_numeric, errors='coerce').fillna(0).astype(int)
         else:
@@ -75,7 +75,7 @@ def main():
         parser = argparse.ArgumentParser(description=f"Calculate pairwise Hamming distances. Version: {VERSION}")
         parser.add_argument("--input", help="Path to the input TSV file")
         parser.add_argument("--output", help="Path to save the output TSV file")
-        parser.add_argument("--crc32", action="store_true", help="Skip input transformations")
+        parser.add_argument("--skip_input_replacements", action="store_true", help="Skip input replacements when there are no strings in the input")
         parser.add_argument("--input_sep", default="\t", help="Input file separator (default: '\t')")
         parser.add_argument("--output_sep", default="\t", help="Output file separator (default: '\t')")
         parser.add_argument("--index_name", default="cgmlst-dists", help="Name for the index column (default: 'cgmlst-dists')")
@@ -94,7 +94,7 @@ def main():
             
         start_time = time.time()
 
-        data = load_data(args.input, args.input_sep, args.crc32)
+        data = load_data(args.input, args.input_sep, args.skip_input_replacements)
         if data is None:
             return
 
