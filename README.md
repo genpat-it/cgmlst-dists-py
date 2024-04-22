@@ -34,11 +34,11 @@ options:
 
 # Validation
 
-cgmlst-dists.py vs cgmlst-dists by Torsten Seemann (https://github.com/tseemann/cgmlst-dists/)
+`cgmlst-dists.py` vs `cgmlst-dists`
 
 ## System Specifications
 
-The script was evaluated on a system running AlmaLinux version 8.8, featuring a Kernel version of 4.18.0-477.13.1.el8_8.x86_64, and powered by an Intel(R) Xeon(R) Gold 6252N CPU at 2.30GHz with 192 CPUs.
+`cgmlst-dists.py` was evaluated on a system running AlmaLinux version 8.8, featuring a Kernel version of 4.18.0-477.13.1.el8_8.x86_64, and powered by an Intel(R) Xeon(R) Gold 6252N CPU at 2.30GHz with 192 CPUs.
 
 Note: If `num_threads` is not specified, the script defaults to using half of the available CPUs plus one.
 
