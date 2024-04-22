@@ -12,15 +12,16 @@ For more information on cgMLST and the original `cgmlst-dists` tool, please refe
 ```bash
 $ python cgmlst-dists.py --help
 usage: cgmlst-dists.py [-h] [--input INPUT] [--output OUTPUT] [--skip_input_replacements] [--input_sep INPUT_SEP] [--output_sep OUTPUT_SEP] [--index_name INDEX_NAME]
-                       [--matrix-format {full,lower-tri,upper-tri}] [--version]
+                       [--matrix-format {full,lower-tri,upper-tri}] [--num_threads NUM_THREADS] [--chunk_size CHUNK_SIZE] [--version]
 
-Calculate pairwise Hamming distances. Version: 0.0.1
+Calculate pairwise Hamming distances. Version: 0.0.2
 
 options:
   -h, --help            show this help message and exit
   --input INPUT         Path to the input TSV file
   --output OUTPUT       Path to save the output TSV file
-  --skip_input_replacements               Skip input replacements when there are no strings in the input (to save unnecessary computations)
+  --skip_input_replacements
+                        Skip input replacements when there are no strings in the input (to save unnecessary computations)
   --input_sep INPUT_SEP
                         Input file separator (default: ' ')
   --output_sep OUTPUT_SEP
@@ -29,6 +30,10 @@ options:
                         Name for the index column (default: 'cgmlst-dists')
   --matrix-format {full,lower-tri,upper-tri}
                         Format for the output matrix (default: full)
+  --num_threads NUM_THREADS
+                        Number of threads for parallel execution (default: 97 cpus)
+  --chunk_size CHUNK_SIZE
+                        Size of chunks to save the output file (default: 1000)
   --version             show program's version number and exit
 ```
 
