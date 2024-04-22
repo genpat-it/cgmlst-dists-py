@@ -44,7 +44,7 @@ Note: If `num_threads` is not specified, the script defaults to using half of th
 
 ## boring.tab (5x6)
 
-Source: https://github.com/tseemann/cgmlst-dists/blob/master/test/100.tab
+Source: https://github.com/tseemann/cgmlst-dists/blob/master/test/boring.tab
 
 ```bash
 $ time ./cgmlst-dists test/boring.tab > validation/boring_c.tab
