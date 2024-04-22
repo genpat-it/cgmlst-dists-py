@@ -4,14 +4,14 @@ This is the Python multithreaded version of `cgmlst-dists` originally developed 
 
 `cgmlst-dists` is a tool used for calculating pairwise Hamming distances for genome profiles in a core genome multilocus sequence typing (cgMLST) schema. This Python version utilizes multithreading to enhance performance during distance calculations.
 
-For more information on cgMLST and the original `cgmlst-dists` tool, please refer to the [cgMLST GitHub repository](https://github.com/tseemann/cgmlst-dists/).
+For more information on cgMLST and the original `cgmlst-dists` tool, please refer to the [cgmlst-dists GitHub repository](https://github.com/tseemann/cgmlst-dists/).
 
 
 # Usage
 
 ```bash
 $ python cgmlst-dists.py --help
-usage: cgmlst-dists.py [-h] [--input INPUT] [--output OUTPUT] [--crc32] [--input_sep INPUT_SEP] [--output_sep OUTPUT_SEP] [--index_name INDEX_NAME]
+usage: cgmlst-dists.py [-h] [--input INPUT] [--output OUTPUT] [--skip_input_replacements] [--input_sep INPUT_SEP] [--output_sep OUTPUT_SEP] [--index_name INDEX_NAME]
                        [--matrix-format {full,lower-tri,upper-tri}] [--version]
 
 Calculate pairwise Hamming distances. Version: 0.0.1
@@ -20,7 +20,7 @@ options:
   -h, --help            show this help message and exit
   --input INPUT         Path to the input TSV file
   --output OUTPUT       Path to save the output TSV file
-  --crc32               Skip input transformations
+  --skip_input_replacements               Skip input replacements when there are no strings in the input (to save unnecessary computations)
   --input_sep INPUT_SEP
                         Input file separator (default: ' ')
   --output_sep OUTPUT_SEP
@@ -43,6 +43,8 @@ The script was evaluated on a system running AlmaLinux version 8.8, featuring a 
 Note: If `num_threads` is not specified, the script defaults to using half of the available CPUs plus one.
 
 ## boring.tab (5x6)
+
+Source: https://github.com/tseemann/cgmlst-dists/blob/master/test/100.tab
 
 ```bash
 $ time ./cgmlst-dists test/boring.tab > validation/boring_c.tab
@@ -78,6 +80,8 @@ f523a48b2339ab7d018fe9b69c3fc326  validation/boring_py.tab
 
 ## chewie.tab (10x10)
 
+Source: https://github.com/tseemann/cgmlst-dists/blob/master/test/chewie.tab
+
 ```bash
 $ time ./cgmlst-dists test/chewie.tab > validation/chewie_c.tab
 This is cgmlst-dists 0.4.0
@@ -110,6 +114,8 @@ de4ba5b0bb0c93fb6fb1ea90467c02ab  validation/chewie_py.tab
 ```
 
 ## 100.tab (100x3016)
+
+Source: https://github.com/tseemann/cgmlst-dists/blob/master/test/100.tab
 
 ```bash
 $ time ./cgmlst-dists test/100.tab > validation/100_c.tab
@@ -144,6 +150,8 @@ $ md5sum validation/100_py.tab
 
 ## crc32.tab (3933x1748)
 
+This input matrix does not contain strings, so in the Python version, replacements are skipped.
+
 ```bash
 $ time ./cgmlst-dists test/crc32.tab > validation/crc32_c.tab
 This is cgmlst-dists 0.4.0
@@ -157,7 +165,7 @@ real    0m57.766s
 user    0m57.325s
 sys     0m0.245s
 
-$ time python cgmlst-dists.py --input test/crc32.tab --output validation/crc32_py.tab --crc32
+$ time python cgmlst-dists.py --input test/crc32.tab --output validation/crc32_py.tab --skip_input_replacements
 Loaded matrix of 3933 samples and 1748 allele calls.
 The final matrix will have 15468489 distances.
 Calculations completed. Saving distances...
@@ -208,10 +216,6 @@ $ md5sum validation/5000_py.tab
 2e6d5d6c8856ef408e4f596a1841bdf6  validation/5000_py.tab
 ```
 
-# Comments
-
-When the initial matrix is large is convenient to use the python version.
-
 # Docker
 
 build
@@ -228,3 +232,9 @@ launch
 ```bash
 docker run --rm -v "$(pwd):/app/data" cgmlst-dists-py --input data/test/100.tab --output data/100_py.tab
 ```
+
+# Comments
+
+* When the initial matrix is large is convenient to use the python version.
+* The C version does not implement multithreading.
+* The C version suffers from memory problems when the input is large.
