@@ -9,7 +9,7 @@ For more information on cgMLST and the original `cgmlst-dists` tool, please refe
 
 # Usage
 
-```bash
+```console
 $ python cgmlst-dists.py --help
 usage: cgmlst-dists.py [-h] [--input INPUT] [--output OUTPUT] [--skip_input_replacements] [--input_sep INPUT_SEP] [--output_sep OUTPUT_SEP] [--index_name INDEX_NAME]
                        [--matrix-format {full,lower-tri,upper-tri}] [--num_threads NUM_THREADS] [--chunk_size CHUNK_SIZE] [--version]
@@ -51,7 +51,7 @@ Note: If `num_threads` is not specified, the script defaults to using half of th
 
 Source: https://github.com/tseemann/cgmlst-dists/blob/master/test/boring.tab
 
-```bash
+```console
 $ time ./cgmlst-dists test/boring.tab > validation/boring_c.tab
 This is cgmlst-dists 0.4.0
 Loaded 5 samples x 6 allele calls
@@ -87,7 +87,7 @@ f523a48b2339ab7d018fe9b69c3fc326  validation/boring_py.tab
 
 Source: https://github.com/tseemann/cgmlst-dists/blob/master/test/chewie.tab
 
-```bash
+```console
 $ time ./cgmlst-dists test/chewie.tab > validation/chewie_c.tab
 This is cgmlst-dists 0.4.0
 Loaded 10 samples x 10 allele calls
@@ -122,7 +122,7 @@ de4ba5b0bb0c93fb6fb1ea90467c02ab  validation/chewie_py.tab
 
 Source: https://github.com/tseemann/cgmlst-dists/blob/master/test/100.tab
 
-```bash
+```console
 $ time ./cgmlst-dists test/100.tab > validation/100_c.tab
 This is cgmlst-dists 0.4.0
 Loaded 100 samples x 3016 allele calls
@@ -157,7 +157,7 @@ $ md5sum validation/100_py.tab
 
 This input matrix does not contain strings, so in the Python version, replacements are skipped.
 
-```bash
+```console
 $ time ./cgmlst-dists test/crc32.tab > validation/crc32_c.tab
 This is cgmlst-dists 0.4.0
 Loaded 3933 samples x 1748 allele calls
@@ -190,7 +190,7 @@ e3f13c85c9028d49a4867eadba20c11a  validation/crc32_py.tab
 
 ## 5000.tab (5000x3016)
 
-```bash
+```console
 $ time ./cgmlst-dists test/5000.tab > validation/5000_c.tab
 This is cgmlst-dists 0.4.0
 Loaded 5000 samples x 3016 allele calls
@@ -224,17 +224,17 @@ $ md5sum validation/5000_py.tab
 # Docker
 
 build
-```bash
+```console
 docker build -t cgmlst-dists-py .
 ```
 
 help
-```bash
+```console
 docker run --rm cgmlst-dists-py
 ```
 
 launch
-```bash
+```console
 docker run --rm -v "$(pwd):/app/data" cgmlst-dists-py --input data/test/100.tab --output data/100_py.tab
 ```
 
