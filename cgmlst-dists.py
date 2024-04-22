@@ -1,5 +1,4 @@
 import os
-
 import argparse
 import pandas as pd
 import numpy as np
@@ -75,7 +74,7 @@ def main():
         parser = argparse.ArgumentParser(description=f"Calculate pairwise Hamming distances. Version: {VERSION}")
         parser.add_argument("--input", help="Path to the input TSV file")
         parser.add_argument("--output", help="Path to save the output TSV file")
-        parser.add_argument("--skip_input_replacements", action="store_true", help="Skip input replacements when there are no strings in the input")
+        parser.add_argument("--skip_input_replacements", action="store_true", help="Skip input replacements when there are no strings in the input (to save unnecessary computations)")
         parser.add_argument("--input_sep", default="\t", help="Input file separator (default: '\t')")
         parser.add_argument("--output_sep", default="\t", help="Output file separator (default: '\t')")
         parser.add_argument("--index_name", default="cgmlst-dists", help="Name for the index column (default: 'cgmlst-dists')")
