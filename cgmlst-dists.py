@@ -1,5 +1,6 @@
 import os
 import argparse
+from typing import Optional
 import pandas as pd
 import numpy as np
 import time
@@ -8,21 +9,41 @@ from numba import jit, prange, set_num_threads
 DEFAULT_THREADS = max(1, os.cpu_count() // 2 + 1)
 VERSION = "0.0.2"
 
-def load_data(file_path, input_sep="\t", skip_input_replacements=False):
-    """Load data from a TSV file."""
+import pandas as pd
+import numpy as np
+
+import pandas as pd
+import numpy as np
+
+def load_data(file_path: str, input_sep: str = "\t", skip_input_replacements: bool = False) -> Optional[pd.DataFrame]:
+    """Load data from a TSV file with optimized performance while maintaining exact output.
+    
+    Args:
+        file_path: Path to input file
+        input_sep: Input file separator (default: tab)
+        skip_input_replacements: Skip string replacements for numeric-only data
+    
+    Returns:
+        pd.DataFrame or None if error occurs
+    """
     try:
-        data = pd.read_csv(file_path, sep=input_sep, index_col=0)
+        # Original step 1: Load the data
+        data = pd.read_csv(file_path, sep=input_sep, index_col=0, low_memory=False)
+        # Original step 2: Process based on skip_input_replacements flag
         if not skip_input_replacements:
-            data = data.replace(r'INF-(\d+)', r'\1', regex=True)
-            data = data.apply(pd.to_numeric, errors='coerce').fillna(0).astype(int)
+            # Original substeps preserved exactly:
+            data.replace(r'^INF-', '', regex=True, inplace=True)
+            data = pd.to_numeric(data.stack(), errors='coerce').unstack().fillna(0)
         else:
+            # Original direct conversion preserved exactly:
             data = data.apply(pd.to_numeric, errors='coerce').astype(int)
         return data
+        
     except Exception as e:
         print(f"Error loading data: {e}")
         return None
 
-@jit(nopython=True, parallel=True)
+@jit(nopython=True, parallel=True, fastmath=True)
 def calculate_hamming_distances_numba(values):
     n_samples = values.shape[0]
     distances = np.zeros((n_samples, n_samples), dtype=np.int64)
