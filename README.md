@@ -6,11 +6,12 @@ A high-performance Python implementation of `cgmlst-dists` for calculating pairw
 
 This is an enhanced Python implementation of `cgmlst-dists` originally developed by Torsten Seemann. It's designed for calculating pairwise Hamming distances for genome profiles in core genome multilocus sequence typing (cgMLST) schemas.
 
-Key features in this version (0.1.0):
+Key features in this version (0.1.2):
 
-- **GPU Acceleration**: Optional CUDA GPU support for faster calculations
+- **GPU Acceleration**: Optional CUDA GPU support for dramatically faster calculations (up to 123x speedup)
+- **Vectorized CPU Computation**: NumPy-based vectorized distance calculation with multi-threaded parallelism
 - **Optimized Memory Management**: Batch processing to handle large datasets efficiently
-- **Multithreaded Processing**: Parallelized calculations across CPU cores
+- **Multithreaded Processing**: Parallelized calculations across CPU cores (numpy releases the GIL)
 - **Intelligent I/O**: Chunked file operations for better performance with large files
 - **Advanced Filtering**: Quality control via loci and sample completeness thresholds
 - **Automatic System Detection**: Optimizes settings based on available hardware
@@ -21,11 +22,11 @@ Key features in this version (0.1.0):
 ### Requirements
 
 - Python 3.9+
-- NumPy (2.2.3)
-- Pandas (2.2.3)
-- Numba (0.61.0)
-- tqdm (4.67.1)
-- psutil (7.0.0)
+- NumPy
+- Pandas
+- Numba
+- tqdm
+- psutil
 
 ### Optional Requirements
 
@@ -35,15 +36,6 @@ Key features in this version (0.1.0):
 
 ```bash
 pip install -r requirements.txt
-```
-
-Create a `requirements.txt` file containing:
-```
-numba==0.61.0
-numpy==2.2.3
-pandas==2.2.3
-psutil==7.0.0
-tqdm==4.67.1
 ```
 
 For GPU support, make sure you have a compatible CUDA Toolkit installed.
@@ -59,7 +51,7 @@ usage: cgmlst-dists.py [-h] [--input INPUT] [--output OUTPUT] [--skip_input_repl
                        [--missing_char MISSING_CHAR] [--locus-completeness LOCUS_COMPLETENESS]
                        [--sample-completeness SAMPLE_COMPLETENESS] [--gpu] [--binary-output] [--version]
 
-Calculate pairwise Hamming distances. Version: 0.1.0
+Calculate pairwise Hamming distances. Version: 0.1.2
 
 options:
   -h, --help            show this help message and exit
@@ -126,7 +118,8 @@ python cgmlst-dists.py --input large_data.tsv --output large_output.tsv --max_me
 
 ## Performance Considerations
 
-- **GPU Acceleration**: Can provide significant speedup (5-20x) for large matrices compared to single-threaded CPU, but requires CUDA-capable NVIDIA GPU
+- **GPU Acceleration**: Provides dramatic speedup for the distance calculation kernel (up to 123x on NVIDIA L4), requires CUDA-capable NVIDIA GPU
+- **CPU Vectorization**: The numpy-based CPU kernel is significantly faster than the previous numba triple-loop approach, scaling well with thread count
 - **Memory Usage**: Adjust `--max_memory_gb` based on your system's available RAM to prevent out-of-memory errors
 - **I/O Performance**: For large files, increase `--io_threads` on systems with fast storage
 - **Binary Output**: Useful for very large matrices (>5000 samples) as it provides faster saving/loading for future analysis
@@ -137,14 +130,29 @@ python cgmlst-dists.py --input large_data.tsv --output large_output.tsv --max_me
 
 ```
 CPU: INTEL(R) XEON(R) GOLD 6542Y
-CPU Cores: 16
-Memory: 62Gi
+CPU Cores: 80
+Memory: 480 GB
 GPU: NVIDIA L4
-GPU Memory: 23034 MiB
-OS: AlmaLinux 9.5 (Teal Serval)
-Kernel: 5.14.0-503.23.2.el9_5.x86_64
-Storage: 1.5T total, 1.4T available
+GPU Memory: 22 GB
+OS: AlmaLinux 10
 ```
+
+#### Distance Calculation Benchmarks (5,000 samples × 3,000 loci)
+
+| Method | Calc Time | Total Time | Speedup (calc) |
+|--------|-----------|------------|----------------|
+| v0.1.1 CPU (8 threads, numba) | 55.5s | 64.2s | 1x |
+| **v0.1.2 CPU (8 threads, numpy)** | **8.5s** | **17.1s** | **6.5x** |
+| v0.1.2 CPU (16 threads, numpy) | 5.1s | 13.9s | 10.9x |
+| **v0.1.2 GPU (NVIDIA L4)** | **0.45s** | **9.6s** | **123x** |
+
+#### Distance Calculation Benchmarks (10,000 samples × 3,000 loci)
+
+| Method | Calc Time | Total Time |
+|--------|-----------|------------|
+| v0.1.1 CPU (8 threads) | 50.8s | 84.9s |
+| **v0.1.2 CPU (8 threads)** | **33.9s** | **68.7s** |
+| **v0.1.2 GPU (NVIDIA L4)** | **1.3s** | **35.7s** |
 
 #### Large-Scale Test (50,000 samples × 5,000 loci)
 
@@ -154,23 +162,7 @@ Storage: 1.5T total, 1.4T available
 | Python CPU version | 16-core CPU | ~32 minutes | Full processing time |
 | Python GPU version | NVIDIA L4 GPU | ~12 minutes | Full processing time |
 
-The test dataset was generated using the companion `cgmlst-data-generator.py` tool:
-```bash
-python cgmlst-data-generator.py --samples 50000 --loci 5000 --output 50k5k.tsv --threads 16
-```
-
-Key performance metrics from GPU run:
-- Data loading: ~2.4 minutes
-- Distance calculation: ~3.6 minutes
-- Saving results: ~6 minutes
-- Total runtime: ~12 minutes
-
-The original C implementation couldn't handle this dataset size, reporting:
-```
-ERROR: could not allocate 18014398502470393 kb RAM
-```
-
-Both CPU and GPU implementations produced identical output files (verified via MD5 checksum), demonstrating accuracy alongside performance gains.
+Both CPU and GPU implementations produce identical output (verified via MD5 checksum).
 
 ## Docker
 

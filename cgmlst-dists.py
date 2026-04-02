@@ -26,99 +26,91 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 DEFAULT_THREADS = max(1, os.cpu_count() // 2)
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 
 def filter_loci_by_completeness(data: pd.DataFrame, missing_char: str, min_completeness: float, silent: bool = False) -> tuple[list, dict]:
     """Filter loci based on completeness threshold."""
-    loci = data.columns.tolist()
-    loci_stats = {}
-    filtered_loci = []
-    
+    total = len(data)
+    # Vectorized missing count: count missing_char and NaN per column
+    missing_counts = data.isin([missing_char]).sum() + data.isna().sum()
+    completeness_pct = ((total - missing_counts) / total) * 100
+
+    loci_stats = {
+        locus: {
+            'total_samples': total,
+            'missing_data': int(missing_counts[locus]),
+            'completeness': completeness_pct[locus]
+        }
+        for locus in data.columns
+    }
+
+    mask = completeness_pct >= min_completeness
+    filtered_loci = data.columns[mask].tolist()
+
     if not silent:
         print("\nLoci filtering details:")
         print("-" * 80)
         print(f"{'Locus':<30} {'Completeness %':<15} {'Status':<10} {'Missing/Total'}")
         print("-" * 80)
-    
-    for locus in loci:
-        total = len(data)
-        missing = sum(data[locus].isin([missing_char, np.nan]))
-        completeness = ((total - missing) / total) * 100
-        
-        loci_stats[locus] = {
-            'total_samples': total,
-            'missing_data': missing,
-            'completeness': completeness
-        }
-        
-        status = "INCLUDED" if completeness >= min_completeness else "EXCLUDED"
-        
-        if not silent:
-            print(f"{locus:<30} {completeness:>11.2f}%  {status:<10} {missing}/{total}")
-        
-        if completeness >= min_completeness:
-            filtered_loci.append(locus)
-    
-    if not silent:
+        for locus in data.columns:
+            status = "INCLUDED" if mask[locus] else "EXCLUDED"
+            print(f"{locus:<30} {completeness_pct[locus]:>11.2f}%  {status:<10} {int(missing_counts[locus])}/{total}")
         print("-" * 80)
-        print(f"Total loci included: {len(filtered_loci)}/{len(loci)} ({len(filtered_loci)/len(loci)*100:.2f}%)")
-        print(f"Total loci excluded: {len(loci)-len(filtered_loci)}/{len(loci)} ({(len(loci)-len(filtered_loci))/len(loci)*100:.2f}%)")
+        n_loci = len(data.columns)
+        print(f"Total loci included: {len(filtered_loci)}/{n_loci} ({len(filtered_loci)/n_loci*100:.2f}%)")
+        print(f"Total loci excluded: {n_loci-len(filtered_loci)}/{n_loci} ({(n_loci-len(filtered_loci))/n_loci*100:.2f}%)")
         print()
-            
+
     return filtered_loci, loci_stats
 
 def filter_samples_by_completeness(data: pd.DataFrame, missing_char: str, min_completeness: float, silent: bool = False) -> tuple[pd.DataFrame, dict]:
     """Filter samples based on completeness threshold."""
-    sample_stats = {}
-    filtered_samples = []
-    
+    total = len(data.columns)
+    # Vectorized missing count per row
+    missing_counts = data.isin([missing_char]).sum(axis=1) + data.isna().sum(axis=1)
+    completeness_pct = ((total - missing_counts) / total) * 100
+
+    sample_stats = {
+        idx: {
+            'total_loci': total,
+            'missing_data': int(missing_counts[idx]),
+            'completeness': completeness_pct[idx]
+        }
+        for idx in data.index
+    }
+
+    mask = completeness_pct >= min_completeness
+    filtered_samples = data.index[mask].tolist()
+
     if not silent:
         print("\nSample filtering details:")
         print("-" * 80)
         print(f"{'Sample ID':<30} {'Completeness %':<15} {'Status':<10} {'Missing/Total'}")
         print("-" * 80)
-    
-    for idx, row in data.iterrows():
-        total = len(data.columns)
-        missing = sum(row.isin([missing_char, np.nan]))
-        completeness = ((total - missing) / total) * 100
-        
-        sample_stats[idx] = {
-            'total_loci': total,
-            'missing_data': missing,
-            'completeness': completeness
-        }
-        
-        status = "INCLUDED" if completeness >= min_completeness else "EXCLUDED"
-        
-        if not silent:
-            print(f"{str(idx)[:30]:<30} {completeness:>11.2f}%  {status:<10} {missing}/{total}")
-        
-        if completeness >= min_completeness:
-            filtered_samples.append(idx)
-    
-    if not silent:
+        for idx in data.index:
+            status = "INCLUDED" if mask[idx] else "EXCLUDED"
+            print(f"{str(idx)[:30]:<30} {completeness_pct[idx]:>11.2f}%  {status:<10} {int(missing_counts[idx])}/{total}")
         print("-" * 80)
-        print(f"Total samples included: {len(filtered_samples)}/{len(data)} ({len(filtered_samples)/len(data)*100:.2f}%)")
-        print(f"Total samples excluded: {len(data)-len(filtered_samples)}/{len(data)} ({(len(data)-len(filtered_samples))/len(data)*100:.2f}%)")
+        n_samples = len(data)
+        print(f"Total samples included: {len(filtered_samples)}/{n_samples} ({len(filtered_samples)/n_samples*100:.2f}%)")
+        print(f"Total samples excluded: {n_samples-len(filtered_samples)}/{n_samples} ({(n_samples-len(filtered_samples))/n_samples*100:.2f}%)")
         print()
-    
+
     filtered_df = data.loc[filtered_samples]
     return filtered_df, sample_stats
 
 def process_chunk(chunk_data, skip_input_replacements, missing_char):
     """Process a data chunk for parallel loading."""
-    # Replace missing data with 0
-    chunk_data.replace(missing_char, 0, inplace=True)
-    
     if not skip_input_replacements:
+        # Remove INF- prefix before replacing missing char, so dtype stays consistent
         chunk_data.replace(r'^INF-', '', regex=True, inplace=True)
-        chunk_data = pd.to_numeric(chunk_data.stack(), errors='coerce').unstack().fillna(0)
+        chunk_data.replace(missing_char, 0, inplace=True)
+        chunk_data = chunk_data.apply(pd.to_numeric, errors='coerce').fillna(0)
     else:
+        chunk_data.replace(missing_char, 0, inplace=True)
         chunk_data = chunk_data.apply(pd.to_numeric, errors='coerce')
-        # Ensure all NaN values are 0
         chunk_data.fillna(0, inplace=True)
-    
+
     return chunk_data
 
 def estimate_file_size(file_path):
@@ -156,7 +148,7 @@ def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replac
             if not silent:
                 print("Small file detected, loading directly...")
             
-            data = pd.read_csv(file_path, sep=input_sep, index_col=0)
+            data = pd.read_csv(file_path, sep=input_sep, index_col=0, low_memory=False)
             data = process_chunk(data, skip_input_replacements, missing_char)
             
             if not silent:
@@ -255,181 +247,204 @@ def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replac
             print(f"Error loading data: {e}")
         return None, None, None
 
-@jit(nopython=True, parallel=True, fastmath=True)
-def calculate_hamming_distances_numba(values):
-    """Calculate Hamming distances between all pairs of samples."""
+def calculate_hamming_distances_numpy(values, num_threads=None, silent=False):
+    """Calculate Hamming distances using numpy vectorized operations with threading."""
     n_samples = values.shape[0]
+    mask = values != 0  # (N, L) boolean - precompute once
     distances = np.zeros((n_samples, n_samples), dtype=np.int32)
-    
-    for i in prange(n_samples):
-        for j in prange(i + 1, n_samples):
-            dist = 0
-            for k in range(values.shape[1]):
-                if values[i, k] != 0 and values[j, k] != 0 and values[i, k] != values[j, k]:
-                    dist += 1
-            
-            distances[i, j] = dist
-            distances[j, i] = dist
-    
+
+    if num_threads is None:
+        num_threads = os.cpu_count() or 1
+
+    def compute_row(i):
+        if i + 1 >= n_samples:
+            return
+        rest_values = values[i + 1:]  # (N-i-1, L)
+        rest_mask = mask[i + 1:]  # (N-i-1, L)
+        both_valid = mask[i] & rest_mask  # broadcast (L,) & (N-i-1, L)
+        different = values[i] != rest_values  # broadcast
+        distances[i, i + 1:] = (both_valid & different).sum(axis=1)
+
+    # numpy releases GIL so threads parallelize well
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        list(tqdm(executor.map(compute_row, range(n_samples)), total=n_samples,
+                  desc="Computing distances", disable=silent))
+
     return distances
 
-@jit(nopython=True, parallel=True, fastmath=True)
-def calculate_hamming_distances_numba_batch(values, start_i, end_i, start_j, end_j):
-    """Calculate distances for a batch of samples."""
-    batch_i_size = end_i - start_i
-    batch_j_size = end_j - start_j
-    distances = np.zeros((batch_i_size, batch_j_size), dtype=np.int32)
-    
-    for i in prange(batch_i_size):
-        for j in prange(batch_j_size):
-            real_i = start_i + i
-            real_j = start_j + j
-            
-            if real_i < real_j:  # Only compute upper triangle
-                dist = 0
-                
-                for k in range(values.shape[1]):
-                    # Compare only when BOTH values are present (not missing)
-                    if values[real_i, k] != 0 and values[real_j, k] != 0:
-                        # If values are different, increment distance
-                        if values[real_i, k] != values[real_j, k]:
-                            dist += 1
-                
-                distances[i, j] = dist
-    
+@jit(nopython=True, parallel=True, fastmath=True, cache=True)
+def calculate_hamming_distances_numba(values):
+    """Calculate Hamming distances between all pairs of samples (fallback)."""
+    n_samples = values.shape[0]
+    distances = np.zeros((n_samples, n_samples), dtype=np.int32)
+
+    for i in prange(n_samples):
+        for j in range(i + 1, n_samples):
+            dist = 0
+            for k in range(values.shape[1]):
+                vi = values[i, k]
+                vj = values[j, k]
+                if vi != 0 and vj != 0 and vi != vj:
+                    dist += 1
+
+            distances[i, j] = dist
+
     return distances
 
 @cuda.jit
 def calculate_hamming_distances_cuda_kernel(values, distances, start_i, start_j):
     """CUDA kernel function for calculating Hamming distances."""
-    # Get thread indices
     i, j = cuda.grid(2)
-    
-    # Get dimensions of the distance matrix
+
     dist_i_size = distances.shape[0]
     dist_j_size = distances.shape[1]
-    
-    # Check if indices are within bounds
+
     if i < dist_i_size and j < dist_j_size:
-        # Map to real indices in the original data
         real_i = start_i + i
         real_j = start_j + j
-        
-        # Only compute upper triangle (avoid duplicating work)
+
         if real_i < real_j:
             dist = 0
-            
-            for k in range(values.shape[1]):
-                # Compare only when BOTH values are present (not missing)
-                if values[real_i, k] != 0 and values[real_j, k] != 0:
-                    # If values are different, increment distance
-                    if values[real_i, k] != values[real_j, k]:
-                        dist += 1
-            
+            n_loci = values.shape[1]
+
+            for k in range(n_loci):
+                vi = values[real_i, k]
+                vj = values[real_j, k]
+                if vi != 0 and vj != 0 and vi != vj:
+                    dist += 1
+
             distances[i, j] = dist
+
+def estimate_gpu_batch_size(n_samples, n_loci, silent=False):
+    """Estimate optimal batch size based on available GPU memory."""
+    try:
+        mem_info = cuda.current_context().get_memory_info()
+        free_mem = mem_info[0]
+    except Exception:
+        free_mem = 2 * 1024**3  # Default 2GB
+
+    # Memory needed: values array (n_samples * n_loci * 4 bytes) + distance batch (batch^2 * 4 bytes)
+    values_mem = n_samples * n_loci * 4
+    available_for_distances = max(free_mem - values_mem - 256 * 1024**2, 256 * 1024**2)  # Reserve 256MB
+    max_batch = int(math.sqrt(available_for_distances / 4))
+    batch_size = min(max_batch, n_samples)
+
+    if not silent:
+        print(f"GPU memory: {free_mem/1024**3:.2f} GB free, batch size: {batch_size}")
+
+    return batch_size
 
 def calculate_hamming_distances_cuda_batch(values, start_i, end_i, start_j, end_j, silent=False):
     """Calculate distances for a batch of samples using CUDA."""
     try:
         batch_i_size = end_i - start_i
         batch_j_size = end_j - start_j
-        
-        # Transfer batch data to GPU
+
+        # Transfer data to GPU
         values_device = cuda.to_device(values)
-        distances_device = cuda.to_device(np.zeros((batch_i_size, batch_j_size), dtype=np.int32))
-        
-        # Configure the grid and blocks
-        threads_per_block = (16, 16)
+        distances_device = cuda.device_array((batch_i_size, batch_j_size), dtype=np.int32)
+        # Zero-initialize
+        distances_device[:] = 0
+
+        # Use 32x32 thread blocks for better occupancy
+        threads_per_block = (32, 32)
         blocks_per_grid_x = (batch_i_size + threads_per_block[0] - 1) // threads_per_block[0]
         blocks_per_grid_y = (batch_j_size + threads_per_block[1] - 1) // threads_per_block[1]
         blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
-        
-        # Launch the kernel
+
         calculate_hamming_distances_cuda_kernel[blocks_per_grid, threads_per_block](
             values_device, distances_device, start_i, start_j
         )
-        
-        # Ensure all GPU operations are complete
+
         cuda.synchronize()
-        
-        # Copy back the results from GPU
         batch_distances = distances_device.copy_to_host()
-        
+
         return batch_distances
     except Exception as e:
         if not silent:
-            print(f"CUDA batch error: {e}")
+            print(f"CUDA batch error: {e}, falling back to CPU")
         return calculate_hamming_distances_numba_batch(values, start_i, end_i, start_j, end_j)
 
-def calculate_distances_batched(data, use_gpu=False, max_memory_gb=8, silent=False):
+def calculate_distances_batched(data, use_gpu=False, max_memory_gb=8, silent=False, **kwargs):
     """Calculate distances in batches to manage memory usage."""
     try:
         values = data.values
         n_samples = values.shape[0]
-        
-        # For small datasets, skip batching for better performance
+        num_threads = kwargs.get('num_threads', os.cpu_count() or 1)
+
+        # CPU path: use numpy vectorized approach (no batching needed)
+        if not use_gpu:
+            if not silent:
+                print(f"Using numpy vectorized calculation with {num_threads} threads")
+            distances = calculate_hamming_distances_numpy(values, num_threads, silent)
+            distances += distances.T
+            return distances
+
+        # GPU path
+        # For small datasets, skip batching
         if n_samples < 100:
             if not silent:
                 print("Small dataset detected, using direct calculation without batching")
-            
-            if use_gpu:
-                try:
-                    return calculate_hamming_distances_cuda_batch(values, 0, n_samples, 0, n_samples, silent)
-                except:
-                    if not silent:
-                        print("GPU calculation failed, falling back to CPU")
-                    return calculate_hamming_distances_numba(values)
-            else:
-                return calculate_hamming_distances_numba(values)
-        
-        # For larger datasets, use batching
-        # Determine maximum batch size based on memory constraint
-        bytes_per_element = 4  # int32
-        max_elements = int((max_memory_gb * 1024 * 1024 * 1024) / bytes_per_element)
-        max_batch_size = int(math.sqrt(max_elements))
-        batch_size = min(max_batch_size, n_samples)
-        
+            try:
+                result = calculate_hamming_distances_cuda_batch(values, 0, n_samples, 0, n_samples, silent)
+            except:
+                if not silent:
+                    print("GPU calculation failed, falling back to CPU")
+                result = calculate_hamming_distances_numpy(values, num_threads, silent)
+            result += result.T
+            return result
+
+        # GPU batching
+        batch_size = estimate_gpu_batch_size(n_samples, values.shape[1], silent)
+
         if not silent:
             print(f"Processing distances in batches of ~{batch_size:,} samples")
             print(f"Total batches: {math.ceil(n_samples/batch_size):,}")
-        
+
         # Initialize the full distance matrix
         distances = np.zeros((n_samples, n_samples), dtype=np.int32)
-        
+
         # Calculate the distances in batches
-        total_batches = sum(1 for i in range(0, n_samples, batch_size) 
+        total_batches = sum(1 for i in range(0, n_samples, batch_size)
                           for j in range(i, n_samples, batch_size))
-        
+
         with tqdm(total=total_batches, desc="Processing batches", disable=silent) as pbar:
             for i_start in range(0, n_samples, batch_size):
                 i_end = min(i_start + batch_size, n_samples)
-                
+
                 for j_start in range(i_start, n_samples, batch_size):
                     j_end = min(j_start + batch_size, n_samples)
-                    
-                    if use_gpu:
-                        # Use GPU for this batch
+
+                    try:
                         batch_distances = calculate_hamming_distances_cuda_batch(
                             values, i_start, i_end, j_start, j_end, silent
                         )
-                    else:
-                        # Use CPU for this batch
-                        batch_distances = calculate_hamming_distances_numba_batch(
-                            values, i_start, i_end, j_start, j_end
-                        )
+                    except:
+                        if not silent:
+                            print("GPU batch failed, falling back to CPU for this batch")
+                        # Fallback: compute this batch with numpy
+                        batch_i = end_i - start_i
+                        batch_j = end_j - start_j
+                        sub_distances = np.zeros((batch_i, batch_j), dtype=np.int32)
+                        for ii in range(batch_i):
+                            ri = i_start + ii
+                            for jj in range(batch_j):
+                                rj = j_start + jj
+                                if ri < rj:
+                                    both = (values[ri] != 0) & (values[rj] != 0)
+                                    sub_distances[ii, jj] = ((values[ri] != values[rj]) & both).sum()
+                        batch_distances = sub_distances
                     
                     # Copy the batch results to the full distance matrix (upper triangle)
                     distances[i_start:i_end, j_start:j_end] = batch_distances
                     pbar.update(1)
         
-        # Mirror the upper triangle to the lower triangle
+        # Mirror the upper triangle to the lower triangle (vectorized)
         if not silent:
             print("Mirroring distance matrix...")
-            
-        for i in range(n_samples):
-            for j in range(i+1, n_samples):
-                distances[j, i] = distances[i, j]
-        
+
+        distances += distances.T
+
         return distances
         
     except Exception as e:
@@ -484,32 +499,32 @@ def save_distances_optimized(distances, file_path, index, output_sep="\t", index
                     print(f"Binary save completed in {binary_save_time:.2f} seconds")
                     print("Now saving in TSV format as requested...")
             
-            # Write the header row with sample names in the column headers
             sample_names = list(map(str, index))
-            header = output_sep.join([index_name] + sample_names)
-            
-            # Create file with header and keep it open
-            with open(file_path, 'w') as f:
-                f.write(header + '\n')
-                
-                # Write data rows sequentially
+
+            if matrix_format == "full":
+                # Use pandas to_csv for fast full-matrix output
                 if not silent:
-                    print(f"Writing data rows sequentially...")
-                
-                for i in tqdm(range(n_samples), desc="Writing rows", disable=silent):
-                    # Create data row
-                    if matrix_format == "lower-tri":
-                        # Only lower triangle
-                        row_values = [str(distances[i, j]) for j in range(0, i + 1)] + ['0'] * (n_samples - i - 1)
-                    elif matrix_format == "upper-tri":
-                        # Only upper triangle
-                        row_values = ['0'] * i + [str(distances[i, j]) for j in range(i, n_samples)]
-                    else:
-                        # Full matrix
-                        row_values = [str(distances[i, j]) for j in range(n_samples)]
-                    
-                    # Write the row
-                    f.write(output_sep.join([sample_names[i]] + row_values) + '\n')
+                    print("Writing full matrix using pandas...")
+                df_out = pd.DataFrame(distances, index=sample_names, columns=sample_names)
+                df_out.index.name = index_name
+                df_out.to_csv(file_path, sep=output_sep)
+            else:
+                # For triangular formats, write row by row
+                if not silent:
+                    print("Converting distance matrix to strings...")
+                dist_str = distances.astype(str)
+                header = output_sep.join([index_name] + sample_names)
+
+                with open(file_path, 'w', buffering=8*1024*1024) as f:
+                    f.write(header + '\n')
+
+                    for i in tqdm(range(n_samples), desc="Writing rows", disable=silent):
+                        if matrix_format == "lower-tri":
+                            row_values = list(dist_str[i, :i+1]) + ['0'] * (n_samples - i - 1)
+                        else:
+                            row_values = ['0'] * i + list(dist_str[i, i:])
+
+                        f.write(output_sep.join([sample_names[i]] + row_values) + '\n')
             
             save_end = time.time()
             save_time = save_end - save_start
@@ -530,26 +545,23 @@ def write_to_stdout(distances, index, output_sep="\t", index_name="cgmlst-dists"
         if distances is not None:
             n_samples = distances.shape[0]
             sample_names = list(map(str, index))
-            
+            dist_str = distances.astype(str)
+
             # Write the header row with sample names
             header = output_sep.join([index_name] + sample_names)
             sys.stdout.write(header + '\n')
-            
+
             # Write data rows
             for i in range(n_samples):
                 if matrix_format == "lower-tri":
-                    # Only lower triangle
-                    row_values = [str(distances[i, j]) for j in range(0, i + 1)] + ['0'] * (n_samples - i - 1)
+                    row_values = list(dist_str[i, :i+1]) + ['0'] * (n_samples - i - 1)
                 elif matrix_format == "upper-tri":
-                    # Only upper triangle
-                    row_values = ['0'] * i + [str(distances[i, j]) for j in range(i, n_samples)]
+                    row_values = ['0'] * i + list(dist_str[i, i:])
                 else:
-                    # Full matrix
-                    row_values = [str(distances[i, j]) for j in range(n_samples)]
-                
-                # Write the row
+                    row_values = list(dist_str[i])
+
                 sys.stdout.write(output_sep.join([sample_names[i]] + row_values) + '\n')
-        
+
     except Exception as e:
         sys.stderr.write(f"Error writing to stdout: {e}\n")
 
@@ -758,7 +770,7 @@ def main():
         
         # Calculate distances and measure time
         calc_start_time = time.time()
-        distances = calculate_distances_batched(data, use_gpu, args.max_memory_gb, args.silent)
+        distances = calculate_distances_batched(data, use_gpu, args.max_memory_gb, args.silent, num_threads=num_threads)
         calc_end_time = time.time()
         calc_time = calc_end_time - calc_start_time
         

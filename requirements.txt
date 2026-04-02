@@ -1,5 +1,5 @@
-numba==0.53.1
-numpy==1.19.5
-pandas==1.1.5
-psutil==7.0.0
-tqdm==4.64.1
+numba
+numpy
+pandas
+psutil
+tqdm
