@@ -26,7 +26,7 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 DEFAULT_THREADS = max(1, os.cpu_count() // 2)
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 
 def filter_loci_by_completeness(data: pd.DataFrame, missing_char: str, min_completeness: float, silent: bool = False) -> tuple[list, dict]:
     """Filter loci based on completeness threshold."""

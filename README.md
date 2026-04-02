@@ -6,7 +6,7 @@ A high-performance Python implementation of `cgmlst-dists` for calculating pairw
 
 This is an enhanced Python implementation of `cgmlst-dists` originally developed by Torsten Seemann. It's designed for calculating pairwise Hamming distances for genome profiles in core genome multilocus sequence typing (cgMLST) schemas.
 
-Key features in this version (0.1.2):
+Key features in this version (0.1.3):
 
 - **GPU Acceleration**: Optional CUDA GPU support for dramatically faster calculations (up to 123x speedup)
 - **Vectorized CPU Computation**: NumPy-based vectorized distance calculation with multi-threaded parallelism
@@ -51,7 +51,7 @@ usage: cgmlst-dists.py [-h] [--input INPUT] [--output OUTPUT] [--skip_input_repl
                        [--missing_char MISSING_CHAR] [--locus-completeness LOCUS_COMPLETENESS]
                        [--sample-completeness SAMPLE_COMPLETENESS] [--gpu] [--binary-output] [--version]
 
-Calculate pairwise Hamming distances. Version: 0.1.2
+Calculate pairwise Hamming distances. Version: 0.1.3
 
 options:
   -h, --help            show this help message and exit
@@ -142,17 +142,17 @@ OS: AlmaLinux 10
 | Method | Calc Time | Total Time | Speedup (calc) |
 |--------|-----------|------------|----------------|
 | v0.1.1 CPU (8 threads, numba) | 55.5s | 64.2s | 1x |
-| **v0.1.2 CPU (8 threads, numpy)** | **8.5s** | **17.1s** | **6.5x** |
-| v0.1.2 CPU (16 threads, numpy) | 5.1s | 13.9s | 10.9x |
-| **v0.1.2 GPU (NVIDIA L4)** | **0.45s** | **9.6s** | **123x** |
+| **v0.1.3 CPU (8 threads, numpy)** | **8.5s** | **17.1s** | **6.5x** |
+| v0.1.3 CPU (16 threads, numpy) | 5.1s | 13.9s | 10.9x |
+| **v0.1.3 GPU (NVIDIA L4)** | **0.45s** | **9.6s** | **123x** |
 
 #### Distance Calculation Benchmarks (10,000 samples × 3,000 loci)
 
 | Method | Calc Time | Total Time |
 |--------|-----------|------------|
 | v0.1.1 CPU (8 threads) | 50.8s | 84.9s |
-| **v0.1.2 CPU (8 threads)** | **33.9s** | **68.7s** |
-| **v0.1.2 GPU (NVIDIA L4)** | **1.3s** | **35.7s** |
+| **v0.1.3 CPU (8 threads)** | **33.9s** | **68.7s** |
+| **v0.1.3 GPU (NVIDIA L4)** | **1.3s** | **35.7s** |
 
 #### Large-Scale Test (50,000 samples × 5,000 loci)
 

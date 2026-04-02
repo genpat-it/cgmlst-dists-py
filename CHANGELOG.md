@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.2] - 2026-04-02
+## [0.1.3] - 2026-04-02
 
 ### Performance
 - Replaced numba triple-loop distance kernel with numpy vectorized computation (~6.5x faster on CPU with 8 threads)
@@ -21,6 +21,10 @@
 
 ### Fixed
 - Fixed mixed-dtype issue when processing files with INF- prefixed allele calls
+
+## [0.1.2] - 2026-04-02
+
+- Added LICENSE file (GPL-3.0) for Bioconda packaging
 
 ## [0.1.1] - 2025-03-17
 
