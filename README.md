@@ -1,5 +1,11 @@
 # cgmlst-dists-py
 
+[![Release](https://img.shields.io/github/v/release/genpat-it/cgmlst-dists-py)](https://github.com/genpat-it/cgmlst-dists-py/releases)
+[![Test and Publish Docker](https://github.com/genpat-it/cgmlst-dists-py/actions/workflows/release.yml/badge.svg)](https://github.com/genpat-it/cgmlst-dists-py/actions/workflows/release.yml)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://ghcr.io/genpat-it/cgmlst-dists-py)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+
 A high-performance Python implementation of `cgmlst-dists` for calculating pairwise Hamming distances in cgMLST data.
 
 ## Overview
