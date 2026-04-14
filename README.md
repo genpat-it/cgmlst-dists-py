@@ -5,11 +5,15 @@
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://ghcr.io/genpat-it/cgmlst-dists-py)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Bioconda](https://img.shields.io/badge/bioconda-pending-yellow)](https://github.com/bioconda/bioconda-recipes/pull/64284)
+[![Bioconda](https://img.shields.io/conda/vn/bioconda/cgmlst-dists-py.svg)](https://bioconda.github.io/recipes/cgmlst-dists-py/README.html)
 
 A high-performance Python implementation of `cgmlst-dists` for calculating pairwise Hamming distances in cgMLST data.
 
-> **Bioconda**: A Bioconda package is currently under review ([bioconda/bioconda-recipes#64284](https://github.com/bioconda/bioconda-recipes/pull/64284)). Once available, install with: `conda install -c bioconda cgmlst-dists-py`
+### Install from Bioconda
+
+```bash
+conda install -c bioconda cgmlst-dists-py
+```
 
 ## Overview
 
