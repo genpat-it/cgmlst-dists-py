@@ -9,11 +9,29 @@
 
 A high-performance Python implementation of `cgmlst-dists` for calculating pairwise Hamming distances in cgMLST data.
 
-### Install from Bioconda
+## Installation
+
+### Bioconda (recommended)
 
 ```bash
 conda install -c bioconda cgmlst-dists-py
 ```
+
+### Docker
+
+```bash
+docker pull ghcr.io/genpat-it/cgmlst-dists-py
+```
+
+### From source
+
+```bash
+git clone https://github.com/genpat-it/cgmlst-dists-py.git
+cd cgmlst-dists-py
+pip install -r requirements.txt
+```
+
+For GPU support, make sure you have a compatible CUDA Toolkit installed.
 
 ## Overview
 
@@ -29,29 +47,6 @@ Key features in this version (0.1.3):
 - **Advanced Filtering**: Quality control via loci and sample completeness thresholds
 - **Automatic System Detection**: Optimizes settings based on available hardware
 - **Binary Output Option**: For extremely large matrices
-
-## Installation
-
-### Requirements
-
-- Python 3.9+
-- NumPy
-- Pandas
-- Numba
-- tqdm
-- psutil
-
-### Optional Requirements
-
-- CUDA Toolkit (for GPU acceleration)
-
-### Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-For GPU support, make sure you have a compatible CUDA Toolkit installed.
 
 ## Usage
 
@@ -177,24 +172,16 @@ OS: AlmaLinux 10
 
 Both CPU and GPU implementations produce identical output (verified via MD5 checksum).
 
-## Docker
-
-### Build
+## Docker Usage
 
 ```bash
-docker build -t cgmlst-dists-py .
+docker run --rm -v "$(pwd):/app/data" ghcr.io/genpat-it/cgmlst-dists-py --input data/input.tab --output data/output.tab
 ```
 
-### Run
+With GPU support:
 
 ```bash
-docker run --rm -v "$(pwd):/app/data" cgmlst-dists-py --input data/input.tab --output data/output.tab
-```
-
-### With GPU Support
-
-```bash
-docker run --rm --gpus all -v "$(pwd):/app/data" cgmlst-dists-py --input data/input.tab --output data/output.tab --gpu
+docker run --rm --gpus all -v "$(pwd):/app/data" ghcr.io/genpat-it/cgmlst-dists-py --input data/input.tab --output data/output.tab --gpu
 ```
 
 ## Advantages Over Original Implementation
