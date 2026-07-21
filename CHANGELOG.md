@@ -24,6 +24,11 @@
   distance kernel).
 
 ### Fixed
+- Completeness filtering (`--locus-completeness` / `--sample-completeness`) was
+  a no-op: it counted the missing *character* in data that had already been
+  converted to numeric (missing → 0), so it never matched and nothing was
+  filtered. It now counts zeros (the post-conversion missing sentinel), so the
+  thresholds actually take effect.
 - Triangular file output (`--matrix-format lower-tri/upper-tri`) no longer
   materializes the whole matrix as strings (`distances.astype(str)`), matching
   the row-by-row streaming already used for stdout — avoids the large-matrix

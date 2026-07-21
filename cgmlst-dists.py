@@ -31,8 +31,10 @@ VERSION = "0.1.6"
 def filter_loci_by_completeness(data: pd.DataFrame, missing_char: str, min_completeness: float, silent: bool = False) -> tuple[list, dict]:
     """Filter loci based on completeness threshold."""
     total = len(data)
-    # Vectorized missing count: count missing_char and NaN per column
-    missing_counts = data.isin([missing_char]).sum() + data.isna().sum()
+    # Completeness runs after numeric conversion, where missing calls are 0,
+    # so count zeros per column (the old `isin([missing_char])` matched a string
+    # against already-numeric data and always found nothing -> filter was a no-op).
+    missing_counts = (data == 0).sum() + data.isna().sum()
     completeness_pct = ((total - missing_counts) / total) * 100
 
     loci_stats = {
@@ -66,8 +68,9 @@ def filter_loci_by_completeness(data: pd.DataFrame, missing_char: str, min_compl
 def filter_samples_by_completeness(data: pd.DataFrame, missing_char: str, min_completeness: float, silent: bool = False) -> tuple[pd.DataFrame, dict]:
     """Filter samples based on completeness threshold."""
     total = len(data.columns)
-    # Vectorized missing count per row
-    missing_counts = data.isin([missing_char]).sum(axis=1) + data.isna().sum(axis=1)
+    # Missing calls are 0 after numeric conversion; count zeros per row
+    # (the old `isin([missing_char])` never matched -> filter was a no-op).
+    missing_counts = (data == 0).sum(axis=1) + data.isna().sum(axis=1)
     completeness_pct = ((total - missing_counts) / total) * 100
 
     sample_stats = {
