@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.4] - 2026-07-21
+
+### Fixed
+- Fixed crash at startup when running the Docker image as a non-root user
+  (e.g. `docker run -u $UID ...`). Numba's `@jit(cache=True)` aborted with
+  `cannot cache function ...: no locator available for file '/app/cgmlst-dists.py'`
+  because neither `/app` nor `$HOME` were writable. The entrypoint now sets a
+  writable `NUMBA_CACHE_DIR` when the caller hasn't provided one.
+
+### Changed
+- README: clearer Docker usage section, including how to run as the current
+  user and how to override the numba cache directory.
+
 ## [0.1.3] - 2026-04-02
 
 ### Performance

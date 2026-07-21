@@ -174,11 +174,51 @@ Both CPU and GPU implementations produce identical output (verified via MD5 chec
 
 ## Docker Usage
 
+Basic run — mount your working directory into the container and point `--input`/`--output` at it:
+
 ```bash
 docker run --rm -v "$(pwd):/app/data" ghcr.io/genpat-it/cgmlst-dists-py --input data/input.tab --output data/output.tab
 ```
 
-With GPU support:
+### Running as the current user
+
+By default the container runs as `root`, so any output file it writes will be owned by `root`.
+To keep the output owned by you, run the container as your own user:
+
+```bash
+docker run --rm -u "$(id -u):$(id -g)" -v "$(pwd):/app/data" \
+  ghcr.io/genpat-it/cgmlst-dists-py --input data/input.tab --output data/output.tab
+```
+
+> **Note (fixed in 0.1.4):** In versions **≤ 0.1.3** running with `-u` crashed at startup with
+> `cannot cache function ...: no locator available for file '/app/cgmlst-dists.py'`. This was a
+> [numba](https://numba.pydata.org/) JIT cache issue: as a non-root user neither `/app` nor `$HOME`
+> are writable, so numba had nowhere to store its compiled cache.
+> If you are stuck on an older image, work around it by pointing the cache at a writable dir:
+> `docker run -u "$(id -u):$(id -g)" -e NUMBA_CACHE_DIR=/tmp ...` (or simply omit `-u` to run as root).
+> From 0.1.4 the entrypoint sets a writable `NUMBA_CACHE_DIR` automatically, so no extra flags are needed.
+
+### Numba cache directory
+
+The tool uses [numba](https://numba.pydata.org/) JIT compilation, which stores its compiled cache
+on disk in the directory given by the `NUMBA_CACHE_DIR` environment variable.
+
+- **Default (nothing to do):** if you don't set `NUMBA_CACHE_DIR`, the container creates a fresh,
+  writable temporary directory on each run. This "just works" for any user, including
+  `-u $UID` and UIDs with no `/etc/passwd` entry.
+- **Override it yourself:** set `NUMBA_CACHE_DIR` to any path the container user can write to.
+  This is useful to keep a **persistent** cache across runs (so numba doesn't recompile every time)
+  by mounting a host directory:
+
+  ```bash
+  mkdir -p ./numba-cache
+  docker run --rm -u "$(id -u):$(id -g)" \
+    -e NUMBA_CACHE_DIR=/cache -v "$(pwd)/numba-cache:/cache" \
+    -v "$(pwd):/app/data" ghcr.io/genpat-it/cgmlst-dists-py \
+    --input data/input.tab --output data/output.tab
+  ```
+
+### GPU support
 
 ```bash
 docker run --rm --gpus all -v "$(pwd):/app/data" ghcr.io/genpat-it/cgmlst-dists-py --input data/input.tab --output data/output.tab --gpu
