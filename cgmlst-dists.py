@@ -26,7 +26,7 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 DEFAULT_THREADS = max(1, os.cpu_count() // 2)
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 
 def filter_loci_by_completeness(data: pd.DataFrame, missing_char: str, min_completeness: float, silent: bool = False) -> tuple[list, dict]:
     """Filter loci based on completeness threshold."""
@@ -539,28 +539,34 @@ def save_distances_optimized(distances, file_path, index, output_sep="\t", index
         if not silent:
             print(f"Error saving distances: {e}")
 
-def write_to_stdout(distances, index, output_sep="\t", index_name="cgmlst-dists", matrix_format="full"):
-    """Write distance matrix directly to stdout for maximum performance."""
+def write_to_stdout(distances, index, output_sep="\t", index_name="cgmlst-dists", matrix_format="full", stream=None):
+    """Write distance matrix directly to stdout for maximum performance.
+
+    The matrix is stringified one row at a time. Converting the whole matrix
+    with a single ``distances.astype(str)`` would allocate an ``<U11`` copy of
+    the entire matrix at once (e.g. ~163 GiB for 63k samples), which blows up
+    on large datasets; row-by-row conversion keeps peak memory to a single row.
+    """
+    out = stream if stream is not None else sys.stdout
     try:
         if distances is not None:
             n_samples = distances.shape[0]
             sample_names = list(map(str, index))
-            dist_str = distances.astype(str)
 
             # Write the header row with sample names
             header = output_sep.join([index_name] + sample_names)
-            sys.stdout.write(header + '\n')
+            out.write(header + '\n')
 
-            # Write data rows
+            # Write data rows (stringify one row at a time to bound memory)
             for i in range(n_samples):
                 if matrix_format == "lower-tri":
-                    row_values = list(dist_str[i, :i+1]) + ['0'] * (n_samples - i - 1)
+                    row_values = list(distances[i, :i+1].astype(str)) + ['0'] * (n_samples - i - 1)
                 elif matrix_format == "upper-tri":
-                    row_values = ['0'] * i + list(dist_str[i, i:])
+                    row_values = ['0'] * i + list(distances[i, i:].astype(str))
                 else:
-                    row_values = list(dist_str[i])
+                    row_values = list(distances[i].astype(str))
 
-                sys.stdout.write(output_sep.join([sample_names[i]] + row_values) + '\n')
+                out.write(output_sep.join([sample_names[i]] + row_values) + '\n')
 
     except Exception as e:
         sys.stderr.write(f"Error writing to stdout: {e}\n")
@@ -710,6 +716,7 @@ def main():
         parser.add_argument("--binary-output", action="store_true", help="Also save results in binary format for large matrices")
         parser.add_argument("--silent", action="store_true", help="Disable all console output for maximum performance")
         parser.add_argument("--stdout", action="store_true", help="Write results to stdout instead of a file")
+        parser.add_argument("--force", action="store_true", help="Skip the up-front memory feasibility check and run even if the matrix may not fit in RAM")
         parser.add_argument("--version", action="version", version=VERSION)
 
         args = parser.parse_args()
@@ -723,7 +730,14 @@ def main():
             if not args.silent:
                 print("No output specified. Please provide --output or use --stdout.")
             return
-        
+
+        # When streaming the matrix to stdout, keep stdout exclusively for the
+        # TSV data and route all informational logging/progress to stderr, so
+        # `--stdout > file` produces a clean, uncorrupted matrix.
+        stdout_stream = sys.stdout
+        if args.stdout:
+            sys.stdout = sys.stderr
+
         # Set number of threads for Numba
         num_threads = args.num_threads
         if not args.silent:
@@ -764,6 +778,37 @@ def main():
             return
 
         n_samples = data.shape[0]
+
+        # Fail fast BEFORE the (potentially long) distance computation.
+        # A full N×N int32 distance matrix needs N²·4 bytes resident in RAM.
+        # For large N this exceeds available memory and would otherwise only
+        # crash *after* minutes of computation (and again when writing output),
+        # which is the worst possible user experience. Check it up front.
+        matrix_gb = (n_samples * n_samples * 4) / (1024 ** 3)
+        try:
+            import psutil
+            available_gb = psutil.virtual_memory().available / (1024 ** 3)
+        except Exception:
+            available_gb = None
+        # Keep ~15% headroom for temporaries, the input frame and the OS.
+        if available_gb is not None and matrix_gb > 0.85 * available_gb and not args.force:
+            needed_gb = matrix_gb / 0.85
+            sys.stderr.write(
+                f"\nERROR: not enough memory for this dataset.\n"
+                f"  Samples:            {n_samples:,}\n"
+                f"  Distance matrix:    {n_samples:,} x {n_samples:,} = ~{matrix_gb:.1f} GiB (int32) to hold in RAM\n"
+                f"  Available memory:   ~{available_gb:.1f} GiB\n"
+                f"\n"
+                f"The run is being aborted NOW, before the distance computation, so you\n"
+                f"don't wait minutes only to crash at the end. Options:\n"
+                f"  - run on a machine with at least ~{needed_gb:.0f} GiB of free RAM\n"
+                f"  - reduce the number of samples (e.g. pre-filter the input)\n"
+                f"  - use --matrix-format lower-tri to shrink the OUTPUT (note: the\n"
+                f"    full matrix is still built in RAM, so this alone may not be enough)\n"
+                f"  - re-run with --force to try anyway (the run may still crash)\n"
+            )
+            sys.exit(1)
+
         if not args.silent:
             print(f"\nCalculating distances for {n_samples} samples and {data.shape[1]} allele calls")
             print(f"The final matrix will have {n_samples*n_samples} distances")
@@ -782,7 +827,7 @@ def main():
         if distances is not None:
             if args.stdout:
                 # Write directly to stdout for maximum performance
-                write_to_stdout(distances, data.index, args.output_sep, args.index_name, args.matrix_format)
+                write_to_stdout(distances, data.index, args.output_sep, args.index_name, args.matrix_format, stream=stdout_stream)
             else:
                 # Save to file
                 if not args.silent:

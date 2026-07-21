@@ -124,6 +124,26 @@ For very large datasets, optimize memory and I/O:
 python cgmlst-dists.py --input large_data.tsv --output large_output.tsv --max_memory_gb 16 --chunk_size 500 --binary-output
 ```
 
+> **Memory requirements (important).** The full distance matrix is held in RAM
+> as `int32`, so it needs roughly **N² × 4 bytes**. For example ~1 GiB for
+> 16k samples, ~16 GiB for 63k samples, ~63 GiB for 126k samples. Since 0.1.5
+> the tool estimates this **before** the distance computation and aborts
+> immediately with a clear message if it will not fit in available RAM,
+> instead of crashing after minutes of work. Run on a machine with more RAM,
+> reduce the number of samples, or pass `--force` to attempt it anyway.
+
+### Writing to stdout
+
+`--stdout` streams the matrix to standard output (all logs and progress go to
+`stderr`), so you can safely redirect it to a file or pipe it to another tool:
+
+```bash
+python cgmlst-dists.py --input data.tsv --stdout > matrix.tsv
+```
+
+Do not run `--stdout` without redirecting on large datasets, or the terminal
+will be flooded with the full N×N matrix.
+
 ## Performance Considerations
 
 - **GPU Acceleration**: Provides dramatic speedup for the distance calculation kernel (up to 123x on NVIDIA L4), requires CUDA-capable NVIDIA GPU
@@ -220,7 +240,21 @@ on disk in the directory given by the `NUMBA_CACHE_DIR` environment variable.
 
 ### GPU support
 
+> **The published Docker image runs on CPU only.** It is based on
+> `python:3.13-slim`, which does not ship the CUDA runtime that numba needs, so
+> even with `--gpus all` the tool reports `GPU available: No` and falls back to
+> the (fast) multi-threaded CPU kernel. GPU acceleration is available when
+> running **from source / conda** on a host with a CUDA-capable NVIDIA GPU and
+> the CUDA Toolkit installed. Running a GPU-enabled container would require an
+> image built on a CUDA base (e.g. `nvidia/cuda:*-runtime`), which is not
+> currently provided.
+
+Note: in `docker run`, `--gpus all` is a **Docker** flag (it exposes host GPUs
+to the container) while `--gpu` is the **tool** flag (it asks the program to use
+a GPU). They are different flags and both would be needed for GPU runs:
+
 ```bash
+# Requires a CUDA-based image AND the NVIDIA Container Toolkit on the host.
 docker run --rm --gpus all -v "$(pwd):/app/data" ghcr.io/genpat-it/cgmlst-dists-py --input data/input.tab --output data/output.tab --gpu
 ```
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.5] - 2026-07-21
+
+### Added
+- Up-front memory feasibility check: the tool now estimates the RAM needed for
+  the N×N distance matrix and **aborts before the distance computation** if it
+  will not fit in available memory, instead of crashing after minutes of work.
+  Override with the new `--force` flag.
+- `--force` flag to skip the feasibility check and run anyway.
+
+### Fixed
+- `--stdout` no longer allocates the entire matrix as strings at once
+  (`distances.astype(str)`), which could try to reserve ~163 GiB for a
+  63k-sample dataset and abort with a `MemoryError` *after* the computation.
+  Rows are now stringified one at a time, bounding peak memory to a single row.
+- When `--stdout` is used, all informational logging and progress now go to
+  **stderr**, so `cgmlst-dists ... --stdout > matrix.tsv` produces a clean,
+  uncorrupted TSV (previously log lines were interleaved into stdout).
+
 ## [0.1.4] - 2026-07-21
 
 ### Fixed
