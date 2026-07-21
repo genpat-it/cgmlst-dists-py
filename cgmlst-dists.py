@@ -141,7 +141,54 @@ def count_lines(file_path):
             # Fallback if memory-mapping fails
             return sum(1 for _ in f)
 
-def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replacements: bool = False, 
+def pyarrow_load(file_path, input_sep, skip_input_replacements, missing_char, silent=False):
+    """Optional fast loader: do the read + numeric conversion with Arrow compute
+    (multithreaded C++). Returns a numeric int32 DataFrame identical to what the
+    pandas path produces, or None if pyarrow is unavailable / anything goes
+    wrong (caller then falls back to the pandas path). Only used when no
+    completeness filter is requested."""
+    try:
+        import pyarrow as pa
+        import pyarrow.csv as pacsv
+        import pyarrow.compute as pc
+    except Exception:
+        return None
+    if len(input_sep) != 1:  # Arrow delimiter must be a single char
+        return None
+    try:
+        tbl = pacsv.read_csv(
+            file_path,
+            parse_options=pacsv.ParseOptions(delimiter=input_sep),
+            convert_options=pacsv.ConvertOptions(null_values=[], strings_can_be_null=False),
+        )
+        names = tbl.column_names
+        index = tbl.column(0).cast(pa.string()).to_pylist()
+        loci = names[1:]
+        arr = np.empty((len(index), len(loci)), dtype=np.int32)
+        for j, name in enumerate(loci):
+            c = tbl.column(name)
+            if pa.types.is_string(c.type) or pa.types.is_large_string(c.type):
+                if not skip_input_replacements:
+                    # Strip one leading 'INF-' (matches the anchored ^INF- regex)
+                    c = pc.replace_substring(c, 'INF-', '', max_replacements=1)
+                c = pc.utf8_trim_whitespace(c)
+                # Missing char -> '0'; anything not a plain integer -> '0'
+                # (matches pandas to_numeric(errors='coerce').fillna(0)).
+                c = pc.if_else(pc.equal(c, missing_char), '0', c)
+                c = pc.if_else(pc.match_substring_regex(c, '^[0-9]+$'), c, '0')
+                c = pc.cast(c, pa.int32())
+            else:
+                c = pc.cast(c, pa.int32(), safe=False)
+            arr[:, j] = c.to_numpy(zero_copy_only=False)
+        if not silent:
+            print(f"Data loaded (Arrow fast path): {arr.shape[0]} samples × {arr.shape[1]} loci")
+        return pd.DataFrame(arr, index=pd.Index(index, name=names[0]), columns=loci)
+    except Exception as e:
+        if not silent:
+            print(f"Arrow fast path unavailable ({e}); using pandas loader")
+        return None
+
+def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replacements: bool = False,
               min_locus_completeness: float = None, min_sample_completeness: float = None,
               missing_char: str = "-", chunk_size: int = 10000, io_threads: int = 4, 
               silent: bool = False) -> tuple[Optional[pd.DataFrame], Optional[dict], Optional[dict]]:
@@ -152,7 +199,21 @@ def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replac
         
         if not silent:
             print(f"\nLoading data from {file_path} ({file_size/1024/1024:.1f} MB)...")
-        
+
+        # Optional Arrow fast path (only when no completeness filtering, which
+        # needs the raw string data). Falls back to the pandas loader on any
+        # issue, so behaviour is unchanged when pyarrow is absent.
+        if min_locus_completeness is None and min_sample_completeness is None:
+            fast = pyarrow_load(file_path, input_sep, skip_input_replacements, missing_char, silent)
+            if fast is not None:
+                data = fast
+                if data.size and int(data.to_numpy().max()) < 32767:
+                    data = data.astype(np.int16)
+                if not silent:
+                    print(f"\nFinal data shape after filtering: {data.shape[0]} samples × {data.shape[1]} loci")
+                    print(f"Data loading time: {time.time()-load_start:.2f} seconds")
+                return data, None, None
+
         # For small files, load directly for better performance
         if file_size < 50 * 1024 * 1024:  # Less than 50MB
             if not silent:

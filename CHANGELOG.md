@@ -3,6 +3,13 @@
 ## [Unreleased] - 0.1.6
 
 ### Performance
+- Optional Arrow-based loader: when `pyarrow` is installed, the read + numeric
+  conversion is done with Arrow compute kernels (multithreaded C++), ~3-4x
+  faster loading on realistic files with `INF-`/missing values (end-to-end
+  ~2x on large inputs). Auto-detected and used only when no completeness
+  filtering is requested; falls back transparently to the pandas loader when
+  pyarrow is absent. Bundled in the Docker image; kept out of `requirements.txt`
+  so pip/conda installs stay lightweight (opt-in via `pip install pyarrow`).
 - Vectorized input parsing: `process_chunk` converts the whole block with a
   single `pd.to_numeric` (plus a vectorized `INF-` strip) instead of a per-cell
   regex replace and a per-column `apply(pd.to_numeric)`. Added a fast path that
