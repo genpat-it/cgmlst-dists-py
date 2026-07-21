@@ -8,6 +8,9 @@
   will not fit in available memory, instead of crashing after minutes of work.
   Override with the new `--force` flag.
 - `--force` flag to skip the feasibility check and run anyway.
+- Short option aliases for every flag (e.g. `-i/--input`, `-o/--output`,
+  `-c/--stdout`, `-t/--num_threads`, `-m/--matrix-format`, `-g/--gpu`,
+  `-s/--silent`, `-f/--force`, `-V/--version`). The long options are unchanged.
 
 ### Fixed
 - `--stdout` no longer allocates the entire matrix as strings at once

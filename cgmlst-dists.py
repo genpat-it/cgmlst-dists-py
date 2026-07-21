@@ -696,28 +696,28 @@ def main():
         parser = argparse.ArgumentParser(description=f"Calculate pairwise Hamming distances. Version: {VERSION}")
         
         # Input/output options
-        parser.add_argument("--input", help="Path to the input TSV file")
-        parser.add_argument("--output", help="Path to save the output TSV file")
-        parser.add_argument("--skip_input_replacements", action="store_true", help="Skip input replacements when there are no strings in the input")
-        parser.add_argument("--input_sep", default="\t", help="Input file separator (default: '\\t')")
-        parser.add_argument("--output_sep", default="\t", help="Output file separator (default: '\\t')")
-        parser.add_argument("--index_name", default="cgmlst-dists", help="Name for the index column (default: 'cgmlst-dists')")
-        parser.add_argument("--matrix-format", choices=["full", "lower-tri", "upper-tri"], default="full", help="Format for the output matrix")
-        parser.add_argument("--num_threads", type=int, default=default_threads, help=f"Number of threads for parallel execution (default: auto-detected {default_threads})")
-        parser.add_argument("--io_threads", type=int, default=default_io_threads, help=f"Number of I/O threads for file operations (default: {default_io_threads})")
-        parser.add_argument("--max_memory_gb", type=float, default=default_memory_gb, help=f"Maximum memory to use in GB for distance calculation (default: {default_memory_gb})")
-        parser.add_argument("--chunk_size", type=int, default=1000, help="Size of chunks for reading/writing files")
-        parser.add_argument("--missing_char", default="-", help="Character used for missing data (default: '-')")
-        parser.add_argument("--locus-completeness", type=float, default=None, 
+        parser.add_argument("-i", "--input", help="Path to the input TSV file")
+        parser.add_argument("-o", "--output", help="Path to save the output TSV file")
+        parser.add_argument("-r", "--skip_input_replacements", action="store_true", help="Skip input replacements when there are no strings in the input")
+        parser.add_argument("-d", "--input_sep", default="\t", help="Input file separator (default: '\\t')")
+        parser.add_argument("-D", "--output_sep", default="\t", help="Output file separator (default: '\\t')")
+        parser.add_argument("-x", "--index_name", default="cgmlst-dists", help="Name for the index column (default: 'cgmlst-dists')")
+        parser.add_argument("-m", "--matrix-format", choices=["full", "lower-tri", "upper-tri"], default="full", help="Format for the output matrix")
+        parser.add_argument("-t", "--num_threads", type=int, default=default_threads, help=f"Number of threads for parallel execution (default: auto-detected {default_threads})")
+        parser.add_argument("-j", "--io_threads", type=int, default=default_io_threads, help=f"Number of I/O threads for file operations (default: {default_io_threads})")
+        parser.add_argument("-M", "--max_memory_gb", type=float, default=default_memory_gb, help=f"Maximum memory to use in GB for distance calculation (default: {default_memory_gb})")
+        parser.add_argument("-k", "--chunk_size", type=int, default=1000, help="Size of chunks for reading/writing files")
+        parser.add_argument("-n", "--missing_char", default="-", help="Character used for missing data (default: '-')")
+        parser.add_argument("-L", "--locus-completeness", type=float, default=None,
                           help="Minimum percentage of non-missing data required for a locus (0-100)")
-        parser.add_argument("--sample-completeness", type=float, default=None,
+        parser.add_argument("-S", "--sample-completeness", type=float, default=None,
                           help="Minimum percentage of non-missing data required for a sample (0-100)")
-        parser.add_argument("--gpu", action="store_true", help="Use GPU acceleration when available")
-        parser.add_argument("--binary-output", action="store_true", help="Also save results in binary format for large matrices")
-        parser.add_argument("--silent", action="store_true", help="Disable all console output for maximum performance")
-        parser.add_argument("--stdout", action="store_true", help="Write results to stdout instead of a file")
-        parser.add_argument("--force", action="store_true", help="Skip the up-front memory feasibility check and run even if the matrix may not fit in RAM")
-        parser.add_argument("--version", action="version", version=VERSION)
+        parser.add_argument("-g", "--gpu", action="store_true", help="Use GPU acceleration when available")
+        parser.add_argument("-b", "--binary-output", action="store_true", help="Also save results in binary format for large matrices")
+        parser.add_argument("-s", "--silent", action="store_true", help="Disable all console output for maximum performance")
+        parser.add_argument("-c", "--stdout", action="store_true", help="Write results to stdout instead of a file")
+        parser.add_argument("-f", "--force", action="store_true", help="Skip the up-front memory feasibility check and run even if the matrix may not fit in RAM")
+        parser.add_argument("-V", "--version", action="version", version=VERSION)
 
         args = parser.parse_args()
         
