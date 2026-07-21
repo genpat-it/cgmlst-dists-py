@@ -1,5 +1,29 @@
 # Changelog
 
+## [Unreleased] - 0.1.6
+
+### Performance
+- Vectorized input parsing: `process_chunk` converts the whole block with a
+  single `pd.to_numeric` (plus a vectorized `INF-` strip) instead of a per-cell
+  regex replace and a per-column `apply(pd.to_numeric)`. Added a fast path that
+  skips all string handling when every column is already numeric. (~15-20%
+  faster loading.)
+- Integer→string lookup table for output writers (full, lower-tri, upper-tri,
+  stdout): rows are stringified by vectorized indexing instead of a per-element
+  `astype(str)` (~60% faster row-by-row save, ~13% faster full-matrix write).
+- Distance kernel fast path when there is no missing data: skips the both-valid
+  masking (~25% faster distance calculation on complete datasets).
+- Downcast alleles to int16 when they fit (halves memory bandwidth in the
+  distance kernel).
+
+### Fixed
+- Triangular file output (`--matrix-format lower-tri/upper-tri`) no longer
+  materializes the whole matrix as strings (`distances.astype(str)`), matching
+  the row-by-row streaming already used for stdout — avoids the large-matrix
+  memory blow-up.
+
+_All changes above are output-preserving: results are byte-identical to 0.1.5._
+
 ## [0.1.5] - 2026-07-21
 
 ### Added

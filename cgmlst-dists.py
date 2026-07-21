@@ -26,7 +26,7 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 DEFAULT_THREADS = max(1, os.cpu_count() // 2)
-VERSION = "0.1.5"
+VERSION = "0.1.6"
 
 def filter_loci_by_completeness(data: pd.DataFrame, missing_char: str, min_completeness: float, silent: bool = False) -> tuple[list, dict]:
     """Filter loci based on completeness threshold."""
@@ -100,18 +100,28 @@ def filter_samples_by_completeness(data: pd.DataFrame, missing_char: str, min_co
     return filtered_df, sample_stats
 
 def process_chunk(chunk_data, skip_input_replacements, missing_char):
-    """Process a data chunk for parallel loading."""
-    if not skip_input_replacements:
-        # Remove INF- prefix before replacing missing char, so dtype stays consistent
-        chunk_data.replace(r'^INF-', '', regex=True, inplace=True)
-        chunk_data.replace(missing_char, 0, inplace=True)
-        chunk_data = chunk_data.apply(pd.to_numeric, errors='coerce').fillna(0)
-    else:
-        chunk_data.replace(missing_char, 0, inplace=True)
-        chunk_data = chunk_data.apply(pd.to_numeric, errors='coerce')
-        chunk_data.fillna(0, inplace=True)
+    """Process a data chunk for parallel loading.
 
-    return chunk_data
+    Vectorized numeric conversion: operate on the whole block as a single numpy
+    string array and do ONE `pd.to_numeric` call, instead of a per-cell regex
+    replace + per-column `apply(pd.to_numeric)` (which dominated load time)."""
+    index, columns = chunk_data.index, chunk_data.columns
+    # Fast path: if every column is already numeric (no 'INF-'/missing text
+    # forced a string/object dtype), skip all string processing entirely.
+    if chunk_data.dtypes.map(pd.api.types.is_numeric_dtype).all():
+        return chunk_data.fillna(0).astype(np.int32)
+    arr = chunk_data.to_numpy(dtype='U')  # single 2D unicode array
+    if not skip_input_replacements:
+        # Strip a single leading chewBBACA 'INF-' prefix, matching the original
+        # anchored regex `^INF-` exactly (count=1 removes only the first
+        # occurrence, so a malformed 'INF-INF-x' stays non-numeric -> 0).
+        arr = np.char.replace(arr, 'INF-', '', 1)
+    # Missing char -> '0'
+    arr[arr == missing_char] = '0'
+    # One vectorized numeric conversion over the whole block; non-numeric -> 0
+    flat = pd.to_numeric(arr.ravel(), errors='coerce')
+    result = np.nan_to_num(np.asarray(flat, dtype=np.float64), nan=0.0).reshape(arr.shape).astype(np.int32)
+    return pd.DataFrame(result, index=index, columns=columns)
 
 def estimate_file_size(file_path):
     """Get file size in bytes."""
@@ -230,7 +240,12 @@ def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replac
             print("Converting data to numeric format...")
         
         data = data.astype(np.int32)
-        
+
+        # Downcast to the smallest int dtype that fits: the distance kernel is
+        # memory-bandwidth bound, so int16 (when alleles fit) ~halves bandwidth.
+        if data.size and int(data.to_numpy().max()) < 32767:
+            data = data.astype(np.int16)
+
         if not silent:
             print(f"\nFinal data shape after filtering: {data.shape[0]} samples × {data.shape[1]} loci")
         
@@ -256,14 +271,18 @@ def calculate_hamming_distances_numpy(values, num_threads=None, silent=False):
     if num_threads is None:
         num_threads = os.cpu_count() or 1
 
+    # Fast path when there is no missing data: skip the both-valid masking
+    # entirely (one boolean array per row instead of three).
+    has_missing = not mask.all()
+
     def compute_row(i):
         if i + 1 >= n_samples:
             return
         rest_values = values[i + 1:]  # (N-i-1, L)
-        rest_mask = mask[i + 1:]  # (N-i-1, L)
-        both_valid = mask[i] & rest_mask  # broadcast (L,) & (N-i-1, L)
         different = values[i] != rest_values  # broadcast
-        distances[i, i + 1:] = (both_valid & different).sum(axis=1)
+        if has_missing:
+            different &= mask[i] & mask[i + 1:]
+        distances[i, i + 1:] = different.sum(axis=1)
 
     # numpy releases GIL so threads parallelize well
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
@@ -502,27 +521,30 @@ def save_distances_optimized(distances, file_path, index, output_sep="\t", index
             sample_names = list(map(str, index))
 
             if matrix_format == "full":
-                # Use pandas to_csv for fast full-matrix output
+                # Buffered row-by-row write using an int->string lookup table
+                # (faster than pandas to_csv, and no full-matrix string copy).
                 if not silent:
-                    print("Writing full matrix using pandas...")
-                df_out = pd.DataFrame(distances, index=sample_names, columns=sample_names)
-                df_out.index.name = index_name
-                df_out.to_csv(file_path, sep=output_sep)
+                    print("Writing full matrix...")
+                lut = build_str_lut(distances)
+                with open(file_path, 'w', buffering=8*1024*1024) as f:
+                    f.write(output_sep.join([index_name] + sample_names) + '\n')
+                    for i in tqdm(range(n_samples), desc="Writing rows", disable=silent):
+                        f.write(output_sep.join([sample_names[i]] + list(lut[distances[i]])) + '\n')
             else:
-                # For triangular formats, write row by row
-                if not silent:
-                    print("Converting distance matrix to strings...")
-                dist_str = distances.astype(str)
+                # For triangular formats, write row by row. Stringify one row
+                # at a time: a single distances.astype(str) would allocate a
+                # full-matrix <U copy (~163 GiB for 63k samples) and OOM.
                 header = output_sep.join([index_name] + sample_names)
 
+                lut = build_str_lut(distances)
                 with open(file_path, 'w', buffering=8*1024*1024) as f:
                     f.write(header + '\n')
 
                     for i in tqdm(range(n_samples), desc="Writing rows", disable=silent):
                         if matrix_format == "lower-tri":
-                            row_values = list(dist_str[i, :i+1]) + ['0'] * (n_samples - i - 1)
+                            row_values = list(lut[distances[i, :i+1]]) + ['0'] * (n_samples - i - 1)
                         else:
-                            row_values = ['0'] * i + list(dist_str[i, i:])
+                            row_values = ['0'] * i + list(lut[distances[i, i:]])
 
                         f.write(output_sep.join([sample_names[i]] + row_values) + '\n')
             
@@ -538,6 +560,14 @@ def save_distances_optimized(distances, file_path, index, output_sep="\t", index
     except Exception as e:
         if not silent:
             print(f"Error saving distances: {e}")
+
+def build_str_lut(distances):
+    """Precompute the string form of every integer 0..max(distances) once, so a
+    row is stringified by vectorized fancy-indexing (lut[row]) instead of a
+    per-element astype(str). Distances are small ints (<= number of loci), so
+    the table is tiny and reused for every row."""
+    maxv = int(distances.max()) if distances.size else 0
+    return np.array([str(k) for k in range(maxv + 1)])
 
 def write_to_stdout(distances, index, output_sep="\t", index_name="cgmlst-dists", matrix_format="full", stream=None):
     """Write distance matrix directly to stdout for maximum performance.
@@ -557,14 +587,16 @@ def write_to_stdout(distances, index, output_sep="\t", index_name="cgmlst-dists"
             header = output_sep.join([index_name] + sample_names)
             out.write(header + '\n')
 
+            lut = build_str_lut(distances)
+
             # Write data rows (stringify one row at a time to bound memory)
             for i in range(n_samples):
                 if matrix_format == "lower-tri":
-                    row_values = list(distances[i, :i+1].astype(str)) + ['0'] * (n_samples - i - 1)
+                    row_values = list(lut[distances[i, :i+1]]) + ['0'] * (n_samples - i - 1)
                 elif matrix_format == "upper-tri":
-                    row_values = ['0'] * i + list(distances[i, i:].astype(str))
+                    row_values = ['0'] * i + list(lut[distances[i, i:]])
                 else:
-                    row_values = list(distances[i].astype(str))
+                    row_values = list(lut[distances[i]])
 
                 out.write(output_sep.join([sample_names[i]] + row_values) + '\n')
 
