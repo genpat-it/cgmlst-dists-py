@@ -50,48 +50,53 @@ Key features in this version (0.1.3):
 
 ## Usage
 
+Every option has a short alias (e.g. `-i`/`--input`); the long forms are shown below.
+
 ```console
 $ python cgmlst-dists.py --help
-usage: cgmlst-dists.py [-h] [--input INPUT] [--output OUTPUT] [--skip_input_replacements] 
-                       [--input_sep INPUT_SEP] [--output_sep OUTPUT_SEP] [--index_name INDEX_NAME]
-                       [--matrix-format {full,lower-tri,upper-tri}] [--num_threads NUM_THREADS] 
-                       [--io_threads IO_THREADS] [--max_memory_gb MAX_MEMORY_GB] [--chunk_size CHUNK_SIZE]
-                       [--missing_char MISSING_CHAR] [--locus-completeness LOCUS_COMPLETENESS]
-                       [--sample-completeness SAMPLE_COMPLETENESS] [--gpu] [--binary-output] [--version]
+usage: cgmlst-dists.py [-h] [-i INPUT] [-o OUTPUT] [-r] [-d INPUT_SEP]
+                       [-D OUTPUT_SEP] [-x INDEX_NAME]
+                       [-m {full,lower-tri,upper-tri}] [-t NUM_THREADS]
+                       [-j IO_THREADS] [-M MAX_MEMORY_GB] [-k CHUNK_SIZE]
+                       [-n MISSING_CHAR] [-L LOCUS_COMPLETENESS]
+                       [-S SAMPLE_COMPLETENESS] [-g] [-b] [-s] [-c] [-f] [-V]
 
-Calculate pairwise Hamming distances. Version: 0.1.3
+Calculate pairwise Hamming distances.
 
 options:
   -h, --help            show this help message and exit
-  --input INPUT         Path to the input TSV file
-  --output OUTPUT       Path to save the output TSV file
-  --skip_input_replacements
+  -i, --input INPUT     Path to the input TSV file
+  -o, --output OUTPUT   Path to save the output TSV file
+  -r, --skip_input_replacements
                         Skip input replacements when there are no strings in the input
-  --input_sep INPUT_SEP
+  -d, --input_sep INPUT_SEP
                         Input file separator (default: '\t')
-  --output_sep OUTPUT_SEP
+  -D, --output_sep OUTPUT_SEP
                         Output file separator (default: '\t')
-  --index_name INDEX_NAME
+  -x, --index_name INDEX_NAME
                         Name for the index column (default: 'cgmlst-dists')
-  --matrix-format {full,lower-tri,upper-tri}
+  -m, --matrix-format {full,lower-tri,upper-tri}
                         Format for the output matrix (default: full)
-  --num_threads NUM_THREADS
+  -t, --num_threads NUM_THREADS
                         Number of threads for parallel execution (default: auto-detected)
-  --io_threads IO_THREADS
-                        Number of I/O threads for file operations
-  --max_memory_gb MAX_MEMORY_GB
-                        Maximum memory to use in GB for distance calculation
-  --chunk_size CHUNK_SIZE
+  -j, --io_threads IO_THREADS
+                        Number of I/O threads for file operations (default: auto-detected)
+  -M, --max_memory_gb MAX_MEMORY_GB
+                        Maximum memory to use in GB for distance calculation (default: auto-detected)
+  -k, --chunk_size CHUNK_SIZE
                         Size of chunks for reading/writing files (default: 1000)
-  --missing_char MISSING_CHAR
+  -n, --missing_char MISSING_CHAR
                         Character used for missing data (default: '-')
-  --locus-completeness LOCUS_COMPLETENESS
+  -L, --locus-completeness LOCUS_COMPLETENESS
                         Minimum percentage of non-missing data required for a locus (0-100)
-  --sample-completeness SAMPLE_COMPLETENESS
+  -S, --sample-completeness SAMPLE_COMPLETENESS
                         Minimum percentage of non-missing data required for a sample (0-100)
-  --gpu                 Use GPU acceleration when available
-  --binary-output       Also save results in binary format for large matrices
-  --version            show program's version number and exit
+  -g, --gpu             Use GPU acceleration when available
+  -b, --binary-output   Also save results in binary format for large matrices
+  -s, --silent          Disable all console output for maximum performance
+  -c, --stdout          Write results to stdout instead of a file
+  -f, --force           Skip the up-front memory feasibility check and run even if the matrix may not fit in RAM
+  -V, --version         show program's version number and exit
 ```
 
 ## Examples
@@ -100,6 +105,12 @@ options:
 
 ```bash
 python cgmlst-dists.py --input input.tsv --output output.tsv
+
+# Same command using short options
+python cgmlst-dists.py -i input.tsv -o output.tsv
+
+# Stream a lower-triangular matrix to stdout with 8 threads
+python cgmlst-dists.py -i input.tsv -c -m lower-tri -t 8 > distances.tsv
 ```
 
 ### With GPU Acceleration (if available)
