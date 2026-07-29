@@ -334,7 +334,7 @@ def test_gpu_batch_falls_back_to_cpu_on_failure(handler, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("simulated CUDA failure")
 
-    monkeypatch.setattr(cd.calculate_hamming_distances_cuda_kernel, "__getitem__", boom)
+    monkeypatch.setattr(cd, "calculate_hamming_distances_cuda_kernel", boom)
     got = cd.calculate_hamming_distances_cuda_batch(v, 0, v.shape[0], 0, v.shape[0], True, handler)
     assert np.array_equal(symmetrize(got), numpy_dist(v, handler))
 
