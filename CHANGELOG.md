@@ -12,6 +12,15 @@
   The Docker image no longer installs it separately, since requirements.txt
   covers it.
 
+### Removed
+- Dead code: the never-called `process_save_chunk`, the unused `Tuple`, `List`,
+  `gzip`, `io`, `multiprocessing` and `ProcessPoolExecutor` imports, and the
+  unread `DEFAULT_THREADS` constant (thread defaults come from
+  `detect_system_capabilities()`). The numba kernel is kept deliberately, with a
+  docstring saying why: it is an independent implementation of the same
+  semantics, used by the test suite as an oracle for the numpy kernel and as the
+  fallback for a failed CUDA batch.
+
 ### Performance
 - The Arrow loader is now used with `--locus-completeness`/`--sample-completeness`
   as well. It had been gated on both filters being absent, on the grounds that

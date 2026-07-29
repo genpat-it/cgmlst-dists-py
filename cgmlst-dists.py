@@ -8,24 +8,20 @@ and optimized I/O performance for large datasets.
 import os
 import argparse
 import sys
-from typing import Optional, Tuple, List
+from typing import Optional
 import pandas as pd
 import numpy as np
 import time
 import math
 from numba import jit, prange, set_num_threads, cuda
 from tqdm import tqdm
-import gzip
 import mmap
-import io
-import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 import warnings
 
 # Suppress pandas warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-DEFAULT_THREADS = max(1, os.cpu_count() // 2)
 VERSION = "0.1.7"
 
 # Missing-data handlers, numbered as in GrapeTree's `--missing/-y` flag so the
@@ -699,15 +695,6 @@ def calculate_distances_batched(data, use_gpu=False, max_memory_gb=8, silent=Fal
         if not silent:
             print(f"Error calculating distances: {e}")
         return None
-
-def process_save_chunk(chunk_idx, row_data, output_file, output_sep, append=True):
-    """Write a chunk of data to disk in a separate process."""
-    mode = 'a' if append else 'w'
-    with open(output_file, mode) as f:
-        f.write('\n'.join(row_data))
-        if row_data:  # Add newline if there's data
-            f.write('\n')
-    return chunk_idx
 
 def save_distances_optimized(distances, file_path, index, output_sep="\t", index_name="cgmlst-dists", 
                           matrix_format="full", chunk_size=1000, io_threads=4, use_binary=False, silent=False):
