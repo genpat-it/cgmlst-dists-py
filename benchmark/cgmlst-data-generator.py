@@ -86,7 +86,11 @@ def generate_test_data(n_samples, n_loci, missing_percentage=5, output_file="tes
     
     for i in range(0, len(df), chunk_size):
         if i == 0:
-            # First chunk, create file
+            # First chunk, create file. The index column needs a name: without one
+            # pandas writes a leading empty field, and the C cgmlst-dists rejects
+            # the file ("row 2 had N+1 cols, expected N-1"), which makes the
+            # generated data unusable for cross-implementation comparison.
+            df.index.name = 'FILE'
             df.iloc[i:i+chunk_size].to_csv(output_file, sep='\t')
         else:
             # Append to existing file

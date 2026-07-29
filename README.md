@@ -79,7 +79,7 @@ This is an enhanced Python implementation of `cgmlst-dists` originally developed
 
 Key features in this version (0.1.7):
 
-- **GPU Acceleration**: Optional CUDA support for the distance kernel (up to 123x speedup); requires an NVIDIA driver and CUDA toolkit, see [GPU support](#gpu-support)
+- **GPU Acceleration**: Optional CUDA support for the distance kernel; requires numba and an NVIDIA driver, see [GPU support](#gpu-support)
 - **Vectorized CPU Computation**: NumPy-based vectorized distance calculation with multi-threaded parallelism
 - **Optimized Memory Management**: Batch processing to handle large datasets efficiently
 - **Multithreaded Processing**: Parallelized calculations across CPU cores (numpy releases the GIL)
@@ -289,52 +289,70 @@ will be flooded with the full N×N matrix.
 
 ## Performance Considerations
 
-- **Fast loading (pyarrow)**: install `pyarrow` for an Arrow-based loader that reads and parses large inputs ~3-4x faster (end-to-end ~2x on large files). Optional and auto-detected; falls back to pandas with identical results.
-- **GPU Acceleration**: Provides dramatic speedup for the distance calculation kernel (up to 123x on NVIDIA L4), requires CUDA-capable NVIDIA GPU
-- **CPU Vectorization**: The numpy-based CPU kernel is significantly faster than the previous numba triple-loop approach, scaling well with thread count
-- **Memory Usage**: Adjust `--max_memory_gb` based on your system's available RAM to prevent out-of-memory errors
-- **I/O Performance**: For large files, increase `--io_threads` on systems with fast storage
-- **Binary Output**: Useful for very large matrices (>5000 samples) as it provides faster saving/loading for future analysis
+- **Fast loading (pyarrow)**: bundled by default; the Arrow-based loader reads and parses large inputs ~1.5x faster end to end than the pandas one. Auto-detected, with an identical-result fallback.
+- **Deduplication**: `--dedup` removes nearly all of the distance computation on clonal data, which is the common case in surveillance.
+- **CPU vectorization**: the numpy kernel scales with thread count; on 80 cores it is 7.6x faster than the single-threaded C implementation (see below).
+- **GPU acceleration**: helps the distance kernel, but the kernel is only part of the total runtime, and the gain depends heavily on free GPU memory, since batches are sized to fit it.
+- **Memory**: the full N x N int32 matrix is held in RAM (1.5 GiB at 20,000 samples, 9.3 GiB at 50,000). The tool checks this up front and refuses to start rather than crashing halfway; `--force` overrides.
+- **I/O**: on large matrices, writing the output is a substantial share of the runtime — 38% in the benchmark below — so `--matrix-format lower-tri` or `--binary-output` are worth considering.
 
-### Performance Benchmarks
+### Benchmarks
 
-#### Test System Specifications
+Measured on 0.1.7. The dataset is synthetic and reproducible with the generator in
+this repository, so anyone can repeat these runs:
 
-```
-CPU: INTEL(R) XEON(R) GOLD 6542Y
-CPU Cores: 80
-Memory: 480 GB
-GPU: NVIDIA L4
-GPU Memory: 22 GB
-OS: AlmaLinux 10
+```bash
+python benchmark/cgmlst-data-generator.py --samples 20000 --loci 3000 --missing 5 --output bench20k.tsv
 ```
 
-#### Distance Calculation Benchmarks (5,000 samples × 3,000 loci)
+Test system: Intel Xeon Gold 6542Y, 80 cores, 480 GB RAM, NVIDIA L4, AlmaLinux 10.
 
-| Method | Calc Time | Total Time | Speedup (calc) |
-|--------|-----------|------------|----------------|
-| v0.1.1 CPU (8 threads, numba) | 55.5s | 64.2s | 1x |
-| **v0.1.3 CPU (8 threads, numpy)** | **8.5s** | **17.1s** | **6.5x** |
-| v0.1.3 CPU (16 threads, numpy) | 5.1s | 13.9s | 10.9x |
-| **v0.1.3 GPU (NVIDIA L4)** | **0.45s** | **9.6s** | **123x** |
+#### 20,000 samples x 3,000 loci (164 MB input, 2.0 GB output matrix)
 
-#### Distance Calculation Benchmarks (10,000 samples × 3,000 loci)
+| Implementation | Runtime | vs C |
+|---|---|---|
+| C `cgmlst-dists` 0.4.0 (single-threaded) | 963.8 s | 1x |
+| this tool, CPU (80 cores) | **127.0 s** | **7.6x** |
+| this tool, CPU + `--dedup`, clonal data* | **63.8 s** | **15.1x** |
 
-| Method | Calc Time | Total Time |
-|--------|-----------|------------|
-| v0.1.1 CPU (8 threads) | 50.8s | 84.9s |
-| **v0.1.3 CPU (8 threads)** | **33.9s** | **68.7s** |
-| **v0.1.3 GPU (NVIDIA L4)** | **1.3s** | **35.7s** |
+\* same 20,000 samples but only 2,000 distinct profiles, as is typical of
+surveillance data. `--dedup` is exact: the output is byte-identical.
 
-#### Large-Scale Test (50,000 samples × 5,000 loci)
+**The C matrix and ours are identical (same md5 over 400 million distances).**
+That is what makes the comparison meaningful: it is the same computation, not a
+different one that happens to be faster.
 
-| Implementation | Hardware | Runtime | Notes |
-|----------------|----------|---------|-------|
-| Original C version | 16-core CPU | Failed | Out of memory error |
-| Python CPU version | 16-core CPU | ~32 minutes | Full processing time |
-| Python GPU version | NVIDIA L4 GPU | ~12 minutes | Full processing time |
+Where the 127 s go:
 
-Both CPU and GPU implementations produce identical output (verified via MD5 checksum).
+| Phase | Time | Share |
+|---|---|---|
+| Loading and parsing | 12.7 s | 11% |
+| Distance calculation | 61.3 s | 51% |
+| Writing the matrix | 46.2 s | 38% |
+
+#### 5,000 samples x 2,000 loci
+
+| Configuration | Runtime |
+|---|---|
+| CPU, pandas loader | 10.1 s |
+| CPU, Arrow loader | 7.0 s |
+| CPU, Arrow loader, 1 thread | 19.8 s |
+
+So the Arrow loader is worth ~1.5x end to end, and multithreading ~2.9x at this
+size (the matrix is small enough that loading and writing dominate).
+
+#### On the GPU numbers
+
+Earlier versions of this README advertised "up to 123x" for the GPU. That figure
+described the distance **kernel** in isolation, not a run: even when the kernel is
+10x faster, loading and writing do not change, so the end-to-end gain is far
+smaller. At 5,000 samples the kernel went from 2.05 s to 0.69 s while total
+runtime moved from 7.0 s to 5.9 s.
+
+The 20,000-sample GPU figure is deliberately **not** published here: the only card
+available was 92% occupied by another process, leaving 1.2 GB, and since batch size
+is derived from free GPU memory the result (308 s, slower than the CPU) says more
+about the contention than about the tool. GPU numbers need a card to yourself.
 
 ## Docker Usage
 
@@ -419,7 +437,7 @@ built for a newer CUDA major version than it supports.
 ## Advantages Over Original Implementation
 
 1. **Scalability**: Efficiently handles much larger datasets through batch processing and memory optimization
-2. **Speed**: Significantly faster for large matrices through multithreading and optional GPU acceleration
+2. **Speed**: 7.6x faster than the C implementation on 20,000 samples with 80 cores, producing an identical matrix; up to 15x on clonal data with `--dedup`
 3. **Data Quality**: Advanced filtering options for more accurate analysis
 4. **Hardware Optimization**: Auto-detects and adapts to available system resources
 5. **More Output Options**: Supports binary format for very large matrices

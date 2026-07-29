@@ -44,6 +44,28 @@
   The Docker image no longer installs it separately, since requirements.txt
   covers it.
 
+### Documentation
+- Benchmarks re-measured on 0.1.7 and made reproducible: the dataset is generated
+  by the script in `benchmark/`, and the exact command is published. On 20,000
+  samples x 3,000 loci this tool takes 127.0 s against 963.8 s for the
+  single-threaded C `cgmlst-dists` 0.4.0 (7.6x), or 63.8 s with `--dedup` on
+  clonal data (15.1x), producing a matrix with the same md5 as the C one over 400
+  million distances.
+
+  The previous figures were from 0.1.3, measured on a dataset that is not in the
+  repository, and the headline "up to 123x" GPU claim described the distance
+  kernel in isolation rather than a run: loading and writing do not speed up, and
+  at 5,000 samples the kernel going 2.05 s -> 0.69 s moved the total only from
+  7.0 s to 5.9 s. The runtime breakdown is now published instead (at 20,000
+  samples: 11% loading, 51% computing, 38% writing), and GPU figures at scale are
+  omitted rather than reported from a card that was 92% occupied by another
+  process.
+- `benchmark/cgmlst-data-generator.py` wrote an unnamed index column, so pandas
+  emitted a leading empty field and the C `cgmlst-dists` rejected the generated
+  file outright ("row 2 had N+1 cols, expected N-1"). The index column is now
+  named, which is what allowed the cross-implementation comparison above.
+- Removed the hardcoded local paths from `benchmark/README.md`.
+
 ### Removed
 - Dead code: the never-called `process_save_chunk`, the unused `Tuple`, `List`,
   `gzip`, `io`, `multiprocessing` and `ProcessPoolExecutor` imports, and the
