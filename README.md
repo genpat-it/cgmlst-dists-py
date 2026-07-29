@@ -77,7 +77,7 @@ byte-identical. The benchmark figures below were measured on the same card.
 
 This is an enhanced Python implementation of `cgmlst-dists` originally developed by Torsten Seemann. It's designed for calculating pairwise Hamming distances for genome profiles in core genome multilocus sequence typing (cgMLST) schemas.
 
-Key features in this version (0.1.6):
+Key features in this version (0.1.7):
 
 - **GPU Acceleration**: Optional CUDA support for the distance kernel (up to 123x speedup); requires an NVIDIA driver and CUDA toolkit, see [GPU support](#gpu-support)
 - **Vectorized CPU Computation**: NumPy-based vectorized distance calculation with multi-threaded parallelism
