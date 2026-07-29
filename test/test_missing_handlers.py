@@ -336,3 +336,34 @@ def test_gpu_batch_falls_back_to_cpu_on_failure(handler, monkeypatch):
     monkeypatch.setattr(cd.calculate_hamming_distances_cuda_kernel, "__getitem__", boom)
     got = cd.calculate_hamming_distances_cuda_batch(v, 0, v.shape[0], 0, v.shape[0], True, handler)
     assert np.array_equal(symmetrize(got), numpy_dist(v, handler))
+
+
+# --------------------------------------------------------------------------
+# Release hygiene: things that must stay in sync across files
+# --------------------------------------------------------------------------
+
+def test_version_is_documented_in_changelog():
+    """A release whose version has no CHANGELOG section is a release with no
+    release notes; the Bioconda recipe and the Docker tag both derive from it."""
+    changelog = (REPO / "CHANGELOG.md").read_text()
+    assert f"{cd.VERSION}]" in changelog or f"- {cd.VERSION}" in changelog, \
+        f"version {cd.VERSION} has no section in CHANGELOG.md"
+
+
+def test_readme_documents_every_cli_flag():
+    """Every option offered by the tool must appear in the README, so the
+    documented interface cannot silently drift from the real one."""
+    helptext = run_cli("--help")
+    flags = set()
+    for token in helptext.replace(",", " ").split():
+        if token.startswith("--") and len(token) > 2:
+            flags.add(token.strip("[]().,"))
+    readme = (REPO / "README.md").read_text()
+    missing = sorted(f for f in flags if f not in readme)
+    assert not missing, f"flags absent from README.md: {missing}"
+
+
+def test_version_flag_matches_module_version():
+    """The Bioconda recipe asserts `--version | grep <tag>`, so this value is
+    part of the packaging contract, not just cosmetic."""
+    assert run_cli("--version").strip() == cd.VERSION

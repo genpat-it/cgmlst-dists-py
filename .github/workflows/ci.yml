@@ -1,0 +1,96 @@
+name: CI
+
+# Runs on every push and pull request, so regressions surface before a release
+# rather than during one.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # pyarrow is an optional accelerator that replaces the whole loading
+          # path, so both configurations must produce identical output. The
+          # Docker image ships with it, plain pip/conda installs do not.
+          - python: "3.13"
+            pyarrow: true
+          - python: "3.13"
+            pyarrow: false
+          - python: "3.11"
+            pyarrow: false
+    name: py${{ matrix.python }}${{ matrix.pyarrow && ' + pyarrow' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # test/crc32.tab and its reference matrices are stored in Git LFS;
+          # without this the regression tests covering them silently skip.
+          lfs: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt pytest
+
+      - name: Install pyarrow
+        if: matrix.pyarrow
+        run: pip install pyarrow
+
+      - name: Run test suite
+        run: pytest test/ -v
+
+      - name: Check for silently skipped tests
+        run: |
+          # A skip here means a reference dataset failed to materialize (LFS),
+          # which would silently weaken the regression coverage. GPU tests are
+          # expected to skip on CI runners, so they are excluded from the count.
+          pytest test/ -q --no-header 2>&1 | tail -2
+          skipped=$(pytest test/ -q --no-header -k "not gpu" 2>&1 | grep -oE '[0-9]+ skipped' | grep -oE '[0-9]+' || echo 0)
+          if [ "${skipped:-0}" -ne 0 ]; then
+            echo "::warning::$skipped non-GPU test(s) skipped; check that Git LFS files were fetched"
+          fi
+
+  docker:
+    # Build and exercise the image on every change, so a broken Dockerfile is
+    # caught here instead of halfway through a release.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          tags: cgmlst-dists-py:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the image
+        run: |
+          set -euo pipefail
+          docker run --rm cgmlst-dists-py:ci --version
+          docker run --rm -v "$PWD":/data:ro cgmlst-dists-py:ci \
+            -i /data/test/boring.tab -c -s | diff - validation/boring_c.tab
+          # Arbitrary UID: numba's cache directory has broken this before.
+          docker run --rm -u 12345:12345 -v "$PWD":/data:ro cgmlst-dists-py:ci \
+            -i /data/test/boring.tab -c -s | diff - validation/boring_c.tab
+          for y in 0 1 2 3; do
+            docker run --rm -v "$PWD":/data:ro cgmlst-dists-py:ci \
+              -i /data/test/boring.tab -c -s -y "$y" > /dev/null
+          done
+          # The image bundles pyarrow, so the Arrow loader must be in use.
+          docker run --rm -v "$PWD":/data:ro cgmlst-dists-py:ci \
+            -i /data/test/boring.tab -c 2>&1 | grep -q "Arrow fast path"
+          echo "Image smoke tests passed"

@@ -13,35 +13,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true   # reference matrices for the regression tests
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        # pyarrow is included because the published image ships with it, so the
+        # release is tested in the same configuration users will run.
+        run: pip install -r requirements.txt pytest pyarrow
 
-      - name: Run tests
+      - name: Run test suite
+        run: pytest test/ -v
+
+      - name: Check that the reported version matches the tag
+        # The Bioconda recipe tests `--version | grep <tag>`, so a mismatch
+        # between VERSION and the release tag breaks the package build.
         run: |
-          # boring.tab
-          python cgmlst-dists.py --input test/boring.tab --stdout --silent > /tmp/boring_out.txt
-          echo "cgmlst-dists	S1	S2	S3	S4	S5
-          S1	0	3	2	3	1
-          S2	3	0	4	3	3
-          S3	2	4	0	1	1
-          S4	3	3	1	0	1
-          S5	1	3	1	1	0" | tr -d ' ' > /tmp/boring_expected.txt
-          diff <(tr -d ' ' < /tmp/boring_out.txt) /tmp/boring_expected.txt && echo "boring: PASS"
-
-          # chewie.tab
-          python cgmlst-dists.py --input test/chewie.tab --stdout --silent > /tmp/chewie_out.txt
-          head -1 /tmp/chewie_out.txt | grep -q "SQ93127" && echo "chewie: PASS"
-
-          # 100.tab
-          python cgmlst-dists.py --input test/100.tab --stdout --silent > /tmp/100_out.txt
-          [ "$(wc -l < /tmp/100_out.txt)" -eq 101 ] && echo "100: PASS"
-
-          echo "All tests passed"
+          tag="${GITHUB_REF_NAME#v}"
+          reported="$(python cgmlst-dists.py --version)"
+          echo "tag=$tag reported=$reported"
+          [ "$tag" = "$reported" ]
 
   docker:
     needs: test
@@ -69,10 +63,53 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
-      - name: Build and push Docker image
+      # Build first and load it locally, so the image is exercised before it is
+      # published. Pushing an image that cannot run is the one failure mode a
+      # release must not have.
+      - name: Build image for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          tags: cgmlst-dists-py:candidate
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the image
+        run: |
+          set -euo pipefail
+
+          # The reported version must match the release tag.
+          tag="${GITHUB_REF_NAME#v}"
+          [ "$(docker run --rm cgmlst-dists-py:candidate --version)" = "$tag" ]
+
+          # Output must be byte-identical to the C implementation's matrix.
+          docker run --rm -v "$PWD":/data:ro cgmlst-dists-py:candidate \
+            -i /data/test/boring.tab -c -s | diff - validation/boring_c.tab
+
+          # Containers are frequently run with an arbitrary UID; numba's cache
+          # directory has broken this before, so it is checked explicitly.
+          docker run --rm -u 12345:12345 -v "$PWD":/data:ro cgmlst-dists-py:candidate \
+            -i /data/test/boring.tab -c -s | diff - validation/boring_c.tab
+
+          # Every missing-data handler must run inside the image.
+          for y in 0 1 2 3; do
+            docker run --rm -v "$PWD":/data:ro cgmlst-dists-py:candidate \
+              -i /data/test/boring.tab -c -s -y "$y" > /dev/null
+          done
+
+          # The image bundles pyarrow, so the Arrow loader must be the one used.
+          docker run --rm -v "$PWD":/data:ro cgmlst-dists-py:candidate \
+            -i /data/test/boring.tab -c 2>&1 | grep -q "Arrow fast path"
+
+          echo "Image smoke tests passed"
+
+      - name: Push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha

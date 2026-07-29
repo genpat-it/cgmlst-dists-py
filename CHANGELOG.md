@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - 0.1.6
+## [0.1.6] - 2026-07-29
 
 ### Added
 - `-y/--missing-handler`: four policies for missing allele calls, numbered as in
@@ -27,6 +27,16 @@
   values, cross-agreement of the numpy/numba/block-fallback/GPU paths,
   invariants, CLI behaviour) plus regression tests pinning the default output
   against both the stored `validation/` matrices and the C implementation's.
+- Continuous integration (`.github/workflows/ci.yml`): the test suite now runs on
+  every push and pull request, not only at release time, across Python 3.11/3.13
+  and with and without `pyarrow` (the optional loader replaces the whole input
+  path, so both configurations must agree). Reference datasets are fetched from
+  Git LFS so their regression tests cannot silently skip.
+- The Docker image is now built and executed in CI and, at release time, is
+  smoke-tested **before** being pushed: reported version against the tag, output
+  byte-identical to the C reference, a run under an arbitrary UID (numba's cache
+  directory has broken this before), all four handlers, and confirmation that
+  the bundled `pyarrow` loader is the one in use.
 
 ### Performance
 - Optional Arrow-based loader: when `pyarrow` is installed, the read + numeric
