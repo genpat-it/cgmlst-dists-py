@@ -265,87 +265,83 @@ def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replac
         if not silent:
             print(f"\nLoading data from {file_path} ({file_size/1024/1024:.1f} MB)...")
 
-        # Optional Arrow fast path (only when no completeness filtering, which
-        # needs the raw string data). Falls back to the pandas loader on any
-        # issue, so behaviour is unchanged when pyarrow is absent.
-        if min_locus_completeness is None and min_sample_completeness is None:
-            fast = pyarrow_load(file_path, input_sep, skip_input_replacements, missing_char, silent)
-            if fast is not None:
-                data = fast
-                if data.size and int(data.to_numpy().max()) < 32767:
-                    data = data.astype(np.int16)
-                if not silent:
-                    print(f"\nFinal data shape after filtering: {data.shape[0]} samples × {data.shape[1]} loci")
-                    print(f"Data loading time: {time.time()-load_start:.2f} seconds")
-                return data, None, None
+        # Optional Arrow fast path: falls back to the pandas loader on any
+        # issue, so behaviour is unchanged when pyarrow is absent. The
+        # completeness filters below count zeros on the numeric frame, so they
+        # apply to this loader's output too; gating the fast path on their
+        # absence (as earlier versions did) only made -L/-S needlessly slow.
+        data = pyarrow_load(file_path, input_sep, skip_input_replacements, missing_char, silent)
+        if data is not None and data.size and int(data.to_numpy().max()) < 32767:
+            data = data.astype(np.int16)
 
-        # For small files, load directly for better performance
-        if file_size < 50 * 1024 * 1024:  # Less than 50MB
-            if not silent:
-                print("Small file detected, loading directly...")
+        if data is None:
+            # For small files, load directly for better performance
+            if file_size < 50 * 1024 * 1024:  # Less than 50MB
+                if not silent:
+                    print("Small file detected, loading directly...")
             
-            data = pd.read_csv(file_path, sep=input_sep, index_col=0, low_memory=False)
-            data = process_chunk(data, skip_input_replacements, missing_char)
+                data = pd.read_csv(file_path, sep=input_sep, index_col=0, low_memory=False)
+                data = process_chunk(data, skip_input_replacements, missing_char)
             
-            if not silent:
-                print(f"Data loaded: {data.shape[0]} samples × {data.shape[1]} loci")
-        else:
-            # For larger files, use chunked reading
-            if not silent:
-                print("Reading file metadata...")
+                if not silent:
+                    print(f"Data loaded: {data.shape[0]} samples × {data.shape[1]} loci")
+            else:
+                # For larger files, use chunked reading
+                if not silent:
+                    print("Reading file metadata...")
                 
-            with open(file_path, 'r') as f:
-                header = f.readline().strip().split(input_sep)
-                num_columns = len(header) - 1  # Subtract 1 for index column
+                with open(file_path, 'r') as f:
+                    header = f.readline().strip().split(input_sep)
+                    num_columns = len(header) - 1  # Subtract 1 for index column
             
-            # Count lines efficiently
-            if not silent:
-                print("Estimating file size...")
+                # Count lines efficiently
+                if not silent:
+                    print("Estimating file size...")
                 
-            num_rows = count_lines(file_path) - 1  # Subtract 1 for header
+                num_rows = count_lines(file_path) - 1  # Subtract 1 for header
             
-            if not silent:
-                print(f"File contains approximately {num_rows:,} rows and {num_columns:,} columns")
+                if not silent:
+                    print(f"File contains approximately {num_rows:,} rows and {num_columns:,} columns")
             
-            # For very large files, adjust chunk size
-            if num_rows > 100000:
-                adjusted_chunk_size = min(num_rows // 20, 10000)  # Aim for ~20 chunks
-                if adjusted_chunk_size != chunk_size and not silent:
-                    print(f"Adjusting chunk size to {adjusted_chunk_size:,} for better performance")
-                chunk_size = adjusted_chunk_size
+                # For very large files, adjust chunk size
+                if num_rows > 100000:
+                    adjusted_chunk_size = min(num_rows // 20, 10000)  # Aim for ~20 chunks
+                    if adjusted_chunk_size != chunk_size and not silent:
+                        print(f"Adjusting chunk size to {adjusted_chunk_size:,} for better performance")
+                    chunk_size = adjusted_chunk_size
             
-            if not silent:
-                print(f"Reading file in chunks of {chunk_size:,} rows using {io_threads} I/O threads...")
+                if not silent:
+                    print(f"Reading file in chunks of {chunk_size:,} rows using {io_threads} I/O threads...")
             
-            # Read the data in chunks to conserve memory and use parallel processing
-            chunk_reader = pd.read_csv(
-                file_path, 
-                sep=input_sep, 
-                index_col=0, 
-                chunksize=chunk_size,
-                low_memory=False
-            )
+                # Read the data in chunks to conserve memory and use parallel processing
+                chunk_reader = pd.read_csv(
+                    file_path, 
+                    sep=input_sep, 
+                    index_col=0, 
+                    chunksize=chunk_size,
+                    low_memory=False
+                )
             
-            # Process each chunk, potentially in parallel
-            chunks = []
-            with ThreadPoolExecutor(max_workers=io_threads) as executor:
-                futures = []
+                # Process each chunk, potentially in parallel
+                chunks = []
+                with ThreadPoolExecutor(max_workers=io_threads) as executor:
+                    futures = []
                 
-                # Submit chunks for processing
-                for i, chunk in enumerate(tqdm(chunk_reader, desc="Reading chunks", disable=silent)):
-                    futures.append(executor.submit(process_chunk, chunk, skip_input_replacements, missing_char))
+                    # Submit chunks for processing
+                    for i, chunk in enumerate(tqdm(chunk_reader, desc="Reading chunks", disable=silent)):
+                        futures.append(executor.submit(process_chunk, chunk, skip_input_replacements, missing_char))
                 
-                # Collect processed chunks
-                for future in tqdm(futures, desc="Processing chunks", disable=silent):
-                    chunks.append(future.result())
+                    # Collect processed chunks
+                    for future in tqdm(futures, desc="Processing chunks", disable=silent):
+                        chunks.append(future.result())
             
-            if not silent:
-                print("Combining chunks...")
+                if not silent:
+                    print("Combining chunks...")
                 
-            data = pd.concat(chunks)
+                data = pd.concat(chunks)
             
-            if not silent:
-                print(f"Initial data shape: {data.shape[0]} samples × {data.shape[1]} loci")
+                if not silent:
+                    print(f"Initial data shape: {data.shape[0]} samples × {data.shape[1]} loci")
         
         # Apply completeness filtering if thresholds are provided
         loci_stats = sample_stats = None
