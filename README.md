@@ -33,14 +33,16 @@ cd cgmlst-dists-py
 pip install -r requirements.txt
 ```
 
-**Optional — faster loading:** install `pyarrow` to enable an Arrow-based loader
-(multithreaded C++) that is ~3-4x faster at reading and parsing large inputs.
-It is auto-detected and entirely optional — without it the tool falls back to
-the pandas loader with identical results. The official Docker image already
-bundles it.
+`pyarrow` is included in `requirements.txt` and enables an Arrow-based loader
+(multithreaded C++) that is 3-4x faster at reading and parsing large inputs. It
+is detected at runtime, so the tool still works without it, falling back to the
+pandas loader with identical results: if pyarrow cannot be installed on your
+platform, drop it from `requirements.txt` and everything keeps working, just
+more slowly.
 
 ```bash
-pip install pyarrow
+# minimal install, without the Arrow loader
+pip install numpy pandas numba tqdm psutil
 ```
 
 For GPU support, make sure you have a compatible CUDA Toolkit installed.

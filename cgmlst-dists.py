@@ -26,7 +26,7 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 DEFAULT_THREADS = max(1, os.cpu_count() // 2)
-VERSION = "0.1.6"
+VERSION = "0.1.7"
 
 # Missing-data handlers, numbered as in GrapeTree's `--missing/-y` flag so the
 # two tools can be compared. All four operate on the same pairwise Hamming

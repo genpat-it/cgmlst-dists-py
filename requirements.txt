@@ -2,4 +2,5 @@ numba
 numpy
 pandas
 psutil
+pyarrow
 tqdm

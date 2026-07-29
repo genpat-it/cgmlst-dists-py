@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased] - 0.1.7
+
+### Changed
+- `pyarrow` is now part of `requirements.txt`, and of the Bioconda run
+  dependencies, instead of being an opt-in extra. It is still probed at runtime
+  and the pandas fallback is unchanged, so an environment without it behaves
+  exactly as before, only slower; the three install routes (pip, conda, Docker)
+  now behave alike rather than two out of three shipping the accelerator. CI
+  keeps one matrix leg that uninstalls pyarrow so the fallback stays covered.
+  The Docker image no longer installs it separately, since requirements.txt
+  covers it.
+
 ## [0.1.6] - 2026-07-29
 
 ### Added

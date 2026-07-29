@@ -53,9 +53,14 @@ jobs:
         run: |
           pip install -r requirements.txt pytest
 
-      - name: Install pyarrow
-        if: matrix.pyarrow
-        run: pip install pyarrow
+      # pyarrow ships in requirements.txt, but the pandas fallback is still a
+      # supported configuration (the loader probes for pyarrow at runtime), so
+      # one leg of the matrix removes it again to keep that path covered.
+      - name: Remove pyarrow to exercise the pandas fallback
+        if: '!matrix.pyarrow'
+        run: |
+          pip uninstall -y pyarrow
+          python -c "import pyarrow" && exit 1 || echo "pyarrow absent as intended"
 
       - name: Run test suite
         run: pytest test/ -v
