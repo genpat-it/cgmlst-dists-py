@@ -101,33 +101,9 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Smoke test the image
-        run: |
-          set -euo pipefail
-
-          # The reported version must match the release tag.
-          tag="${GITHUB_REF_NAME#v}"
-          [ "$(docker run --rm cgmlst-dists-py:candidate --version)" = "$tag" ]
-
-          # Output must be byte-identical to the C implementation's matrix.
-          docker run --rm -v "$PWD":/data:ro cgmlst-dists-py:candidate \
-            -i /data/test/boring.tab -c -s | diff - validation/boring_c.tab
-
-          # Containers are frequently run with an arbitrary UID; numba's cache
-          # directory has broken this before, so it is checked explicitly.
-          docker run --rm -u 12345:12345 -v "$PWD":/data:ro cgmlst-dists-py:candidate \
-            -i /data/test/boring.tab -c -s | diff - validation/boring_c.tab
-
-          # Every missing-data handler must run inside the image.
-          for y in 0 1 2 3; do
-            docker run --rm -v "$PWD":/data:ro cgmlst-dists-py:candidate \
-              -i /data/test/boring.tab -c -s -y "$y" > /dev/null
-          done
-
-          # The image bundles pyarrow, so the Arrow loader must be the one used.
-          docker run --rm -v "$PWD":/data:ro cgmlst-dists-py:candidate \
-            -i /data/test/boring.tab -c 2>&1 | grep -q "Arrow fast path"
-
-          echo "Image smoke tests passed"
+        # The expected version is the release tag, so an image reporting the
+        # wrong version can never be published.
+        run: test/smoke_image.sh cgmlst-dists-py:candidate "${GITHUB_REF_NAME#v}"
 
       - name: Push Docker image
         uses: docker/build-push-action@v6

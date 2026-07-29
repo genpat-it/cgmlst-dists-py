@@ -83,19 +83,4 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Smoke test the image
-        run: |
-          set -euo pipefail
-          docker run --rm cgmlst-dists-py:ci --version
-          docker run --rm -v "$PWD":/data:ro cgmlst-dists-py:ci \
-            -i /data/test/boring.tab -c -s | diff - validation/boring_c.tab
-          # Arbitrary UID: numba's cache directory has broken this before.
-          docker run --rm -u 12345:12345 -v "$PWD":/data:ro cgmlst-dists-py:ci \
-            -i /data/test/boring.tab -c -s | diff - validation/boring_c.tab
-          for y in 0 1 2 3; do
-            docker run --rm -v "$PWD":/data:ro cgmlst-dists-py:ci \
-              -i /data/test/boring.tab -c -s -y "$y" > /dev/null
-          done
-          # The image bundles pyarrow, so the Arrow loader must be in use.
-          docker run --rm -v "$PWD":/data:ro cgmlst-dists-py:ci \
-            -i /data/test/boring.tab -c 2>&1 | grep -q "Arrow fast path"
-          echo "Image smoke tests passed"
+        run: test/smoke_image.sh cgmlst-dists-py:ci
