@@ -41,6 +41,29 @@ ALL_HANDLERS = [
     cd.HANDLER_ABSOLUTE,
 ]
 
+# --------------------------------------------------------------------------
+# GPU path (skipped when no CUDA device is present)
+# --------------------------------------------------------------------------
+
+def has_cuda():
+    try:
+        from numba import cuda
+        return cuda.is_available()
+    except Exception:
+        return False
+
+
+requires_cuda = pytest.mark.skipif(not has_cuda(), reason="no CUDA device available")
+
+
+def has_numba():
+    return importlib.util.find_spec("numba") is not None
+
+
+# numba is only needed for --gpu and for the oracle kernel, so it may legitimately
+# be absent; those tests skip rather than fail.
+requires_numba = pytest.mark.skipif(not has_numba(), reason="numba not installed")
+
 
 def run_cli(*args):
     """Run the tool and return its stdout matrix as text."""
@@ -140,6 +163,7 @@ def test_worked_example(tmp_path, handler, expected):
 # All three CPU implementations must agree, for every handler
 # --------------------------------------------------------------------------
 
+@requires_numba
 @pytest.mark.parametrize("handler", ALL_HANDLERS)
 def test_numpy_numba_and_block_fallback_agree(handler):
     v = profiles(40, 60, 0.15, seed=7)
@@ -280,19 +304,6 @@ def test_invalid_handler_is_rejected():
     assert "invalid choice" in proc.stderr
 
 
-# --------------------------------------------------------------------------
-# GPU path (skipped when no CUDA device is present)
-# --------------------------------------------------------------------------
-
-def has_cuda():
-    try:
-        from numba import cuda
-        return cuda.is_available()
-    except Exception:
-        return False
-
-
-requires_cuda = pytest.mark.skipif(not has_cuda(), reason="no CUDA device available")
 
 
 @requires_cuda

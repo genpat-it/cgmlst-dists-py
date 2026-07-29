@@ -1039,8 +1039,14 @@ def main():
         # it would undo the lazy import for every CPU run; the numpy path takes
         # its thread count directly from num_threads.
         if args.gpu:
-            from numba import set_num_threads
-            set_num_threads(num_threads)
+            # numba may not be installed at all: --gpu then degrades to the CPU
+            # path with a warning (see check_gpu_availability), so a missing
+            # import here must not abort the run.
+            try:
+                from numba import set_num_threads
+                set_num_threads(num_threads)
+            except ImportError:
+                pass
         
         # Start total timing
         total_start_time = time.time()
@@ -1056,8 +1062,8 @@ def main():
                 # the environment, which the CPU-only Docker image does not carry.
                 sys.stderr.write(
                     "WARNING: --gpu requested but no usable CUDA device was found; "
-                    "computing on the CPU instead. GPU use needs an NVIDIA driver on "
-                    "the host (the published Docker image is CPU-only).\n"
+                    "computing on the CPU instead. GPU use needs numba and an NVIDIA "
+                    "driver on the host (the published Docker image is CPU-only).\n"
                 )
         
         # Print system capabilities if not silent
