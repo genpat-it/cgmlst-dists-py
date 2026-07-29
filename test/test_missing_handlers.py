@@ -367,3 +367,50 @@ def test_version_flag_matches_module_version():
     """The Bioconda recipe asserts `--version | grep <tag>`, so this value is
     part of the packaging contract, not just cosmetic."""
     assert run_cli("--version").strip() == cd.VERSION
+
+
+# --------------------------------------------------------------------------
+# Exit codes: a failed run must not look like a successful one
+# --------------------------------------------------------------------------
+
+def run_raw(*args):
+    """Run the tool without checking the exit status."""
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), *map(str, args)],
+        capture_output=True, text=True,
+    )
+
+
+def test_missing_input_file_fails_loudly(tmp_path):
+    """A pipeline must be able to tell that the input could not be read; this
+    used to exit 0 with no output and no message under --silent."""
+    proc = run_raw("-i", tmp_path / "nope.tab", "-c", "-s")
+    assert proc.returncode == 1
+    assert "ERROR" in proc.stderr
+    assert proc.stdout == ""
+
+
+def test_unreadable_input_reports_the_path(tmp_path):
+    bad = tmp_path / "truncated.tab"
+    bad.write_bytes(b"\x00\x01\x02")
+    proc = run_raw("-i", bad, "-c", "-s")
+    assert proc.returncode != 0
+    assert "ERROR" in proc.stderr
+
+
+def test_no_output_destination_is_a_usage_error():
+    proc = run_raw("-i", REPO / "test" / "boring.tab")
+    assert proc.returncode == 2
+    assert "ERROR" in proc.stderr
+
+
+def test_no_arguments_is_a_usage_error():
+    proc = run_raw()
+    assert proc.returncode == 2
+    assert "usage" in proc.stderr.lower()
+
+
+def test_successful_run_exits_zero(tmp_path):
+    proc = run_raw("-i", REPO / "test" / "boring.tab", "-o", tmp_path / "o.tab", "-s")
+    assert proc.returncode == 0
+    assert proc.stderr == ""

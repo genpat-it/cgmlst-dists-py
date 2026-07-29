@@ -171,6 +171,12 @@ def process_chunk(chunk_data, skip_input_replacements, missing_char):
     string array and do ONE `pd.to_numeric` call, instead of a per-cell regex
     replace + per-column `apply(pd.to_numeric)` (which dominated load time)."""
     index, columns = chunk_data.index, chunk_data.columns
+    # An empty block has nothing to convert, and the vectorized string ops below
+    # raise on zero-size arrays (np.char reduces over element lengths), which
+    # surfaced as a cryptic "zero-size array to reduction operation maximum"
+    # for a header-only input.
+    if chunk_data.empty:
+        return chunk_data.astype(np.int32)
     # Fast path: if every column is already numeric (no 'INF-'/missing text
     # forced a string/object dtype), skip all string processing entirely.
     if chunk_data.dtypes.map(pd.api.types.is_numeric_dtype).all():
@@ -347,6 +353,17 @@ def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replac
             if not silent:
                 print(f"Initial data shape: {data.shape[0]} samples × {data.shape[1]} loci")
         
+        # Reject input that parsed but holds nothing to compare, rather than
+        # emitting an empty matrix and exiting 0. A binary or otherwise
+        # unparseable file typically lands here: pandas reads its first line as a
+        # header and finds no rows.
+        if data.shape[0] == 0:
+            raise ValueError("no samples found (is this a TSV with a header row "
+                             f"and one row per sample? check --input_sep)")
+        if data.shape[1] == 0:
+            raise ValueError("no loci found (is this a TSV with one column per "
+                             "locus? check --input_sep)")
+
         # Apply completeness filtering if thresholds are provided
         loci_stats = sample_stats = None
         
@@ -384,8 +401,9 @@ def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replac
         return data, loci_stats, sample_stats
         
     except Exception as e:
-        if not silent:
-            print(f"Error loading data: {e}")
+        # Always on stderr, even with --silent: a caller that cannot read the
+        # input must not be left thinking the run succeeded.
+        sys.stderr.write(f"ERROR: could not load {file_path}: {e}\n")
         return None, None, None
 
 def calculate_hamming_distances_numpy(values, num_threads=None, silent=False,
@@ -978,13 +996,12 @@ def main():
         
         # Check if input/output parameters are provided
         if not args.input:
-            parser.print_help()
-            return
+            parser.print_help(sys.stderr)
+            sys.exit(2)
             
         if not args.output and not args.stdout:
-            if not args.silent:
-                print("No output specified. Please provide --output or use --stdout.")
-            return
+            sys.stderr.write("ERROR: no output specified. Provide --output or use --stdout.\n")
+            sys.exit(2)
 
         # When streaming the matrix to stdout, keep stdout exclusively for the
         # TSV data and route all informational logging/progress to stderr, so
@@ -1030,7 +1047,9 @@ def main():
         load_time = load_end_time - load_start_time
         
         if data is None:
-            return
+            # Exiting 0 here made a missing or unreadable input look like a
+            # successful run producing no output, which a pipeline cannot detect.
+            sys.exit(1)
 
         handler = args.missing_handler
         if not args.silent and handler != HANDLER_ABSOLUTE:
@@ -1104,9 +1123,12 @@ def main():
                     args.index_name, args.matrix_format, args.chunk_size, 
                     args.io_threads, args.binary_output, args.silent
                 )
+        else:
+            sys.stderr.write("ERROR: distance calculation failed, no output written\n")
+            sys.exit(1)
         save_end_time = time.time()
         save_time = save_end_time - save_start_time
-        
+
         if not args.silent:
             print("\nProcess completed successfully")
 
@@ -1119,9 +1141,11 @@ def main():
             print_performance_summary(load_time, calc_time, save_time, total_time)
             print(f"Total time taken: {total_time:.2f} seconds")
 
+    except SystemExit:
+        raise
     except Exception as e:
-        if not args.silent:
-            print(f"An error occurred: {e}")
+        sys.stderr.write(f"ERROR: {e}\n")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
