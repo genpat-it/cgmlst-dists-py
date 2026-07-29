@@ -54,7 +54,8 @@ themselves come with numba, so no separate toolkit install is required.
 |---|---|
 | Bioconda | supported — needs only an NVIDIA driver on the host |
 | From source | supported — needs only an NVIDIA driver on the host |
-| Docker image | **not supported**: the image lacks the CUDA compiler, see [GPU support in Docker](#gpu-support-in-docker) |
+| Docker, published image | **not supported**: CPU-only, see [GPU support in Docker](#gpu-support-in-docker) |
+| Docker, `Dockerfile.gpu` | supported — build it yourself, it is not published |
 
 Passing `--gpu` without a usable device is not an error: the tool warns on stderr
 and computes on the CPU, producing identical results. Verified on an NVIDIA L4
@@ -353,8 +354,26 @@ NvvmSupportError: libNVVM cannot be found
 ```
 
 The tool detects this, warns on stderr and computes on the CPU, so results are
-still correct. For GPU runs use the conda or from-source install described in
-[GPU support](#gpu-support).
+still correct.
+
+For GPU runs in a container, build `Dockerfile.gpu`, which is provided but
+deliberately **not published**: it is built on a conda base so that conda-forge's
+numba supplies the CUDA compiler, which makes it 3.4 GB against 877 MB for the
+CPU-only image. Most users do not need it, so it is not worth pushing to the
+registry on every release.
+
+```bash
+docker build -f Dockerfile.gpu -t cgmlst-dists-py:gpu .
+
+docker run --rm --gpus all -v "$PWD":/data cgmlst-dists-py:gpu \
+    -i /data/input.tsv -o /data/output.tsv --gpu
+```
+
+This needs an NVIDIA driver and the NVIDIA Container Toolkit on the host, plus
+`--gpus all` on the run command. Verified on an NVIDIA L4: the image reports the
+device and produces a matrix byte-identical to the CPU path. Note that
+`cuda-version` is pinned to 12 in the file, because a host driver cannot run code
+built for a newer CUDA major version than it supports.
 
 ## Advantages Over Original Implementation
 

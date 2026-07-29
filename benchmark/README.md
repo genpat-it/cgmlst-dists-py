@@ -124,7 +124,7 @@ The large dataset was then processed using both CPU and GPU implementations:
 
 ```bash
 # GPU processing
-$ time python cgmlst-dists.py --input /mnt/disk2/a.deruvo/50k5k.tsv --output /mnt/disk2/a.deruvo/50k5k_distance_gpu.tsv --gpu
+$ time python cgmlst-dists.py --input /data/50k5k.tsv --output /data/50k5k_distance_gpu.tsv --gpu
 
 System capabilities detected:
 - CPU cores: 16
@@ -138,7 +138,7 @@ CUDA GPU is available: b'NVIDIA L4'
 Compute capability: (8, 9)
 GPU Memory: Free 21.86 GB, Total 22.05 GB
 
-Loading data from /mnt/disk2/a.deruvo/50k5k.tsv (683.6 MB)...
+Loading data from /data/50k5k.tsv (683.6 MB)...
 Reading file metadata...
 Estimating file size...
 File contains approximately 50,000 rows and 5,000 columns
@@ -158,7 +158,7 @@ Mirroring distance matrix...
 Total distance calculation time: 215.59 seconds
 
 Calculations completed. Saving distances...
-Saving distance matrix (50000 x 50000, ~9536.7 MB) to /mnt/disk2/a.deruvo/50k5k_distance_gpu.tsv
+Saving distance matrix (50000 x 50000, ~9536.7 MB) to /data/50k5k_distance_gpu.tsv
 Preparing chunks for writing...
 Writing 50 chunks to file using 4 I/O threads...
 Total save process time: 364.02 seconds
@@ -183,7 +183,7 @@ Total time taken: 722.52 seconds
 ### Original C Implementation Attempt
 
 ```bash
-$ time ./cgmlst-dists /mnt/disk2/a.deruvo/50k5k.tsv > 50k5k_distance_tseeman
+$ time ./cgmlst-dists /data/50k5k.tsv > 50k5k_distance_tseeman
 This is cgmlst-dists 0.4.0
 Loaded 50000 samples x 5000 allele calls
 ERROR: could not allocate 18014398502470393 kb RAM
@@ -197,10 +197,10 @@ sys     0m0.929s
 Validating that both CPU and GPU implementations produce identical results:
 
 ```bash
-$ md5sum /mnt/disk2/a.deruvo/50k5k_distance_cpu.tsv
-ff0ba122315ffc22f56023cb03c0c04f  /mnt/disk2/a.deruvo/50k5k_distance_cpu.tsv
-$ md5sum /mnt/disk2/a.deruvo/50k5k_distance_gpu.tsv
-ff0ba122315ffc22f56023cb03c0c04f  /mnt/disk2/a.deruvo/50k5k_distance_gpu.tsv
+$ md5sum /data/50k5k_distance_cpu.tsv
+ff0ba122315ffc22f56023cb03c0c04f  /data/50k5k_distance_cpu.tsv
+$ md5sum /data/50k5k_distance_gpu.tsv
+ff0ba122315ffc22f56023cb03c0c04f  /data/50k5k_distance_gpu.tsv
 ```
 
 ## Example Output (Small Dataset)

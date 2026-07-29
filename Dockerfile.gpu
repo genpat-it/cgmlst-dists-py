@@ -1,0 +1,44 @@
+# GPU-enabled image. NOT published: build it yourself if you want --gpu in a
+# container. The default Dockerfile is CPU-only and is the one on ghcr.io.
+#
+#   docker build -f Dockerfile.gpu -t cgmlst-dists-py:gpu .
+#   docker run --rm --gpus all -v "$PWD":/data cgmlst-dists-py:gpu -i /data/in.tab -o /data/out.tab --gpu
+#
+# Why a separate image is needed at all: the host provides the GPU and the
+# driver, and the NVIDIA container runtime exposes both, but numba compiles its
+# CUDA kernels at runtime *inside* the container. That needs libnvvm, the NVVM
+# compiler from the CUDA toolkit, which the slim Python base image does not have
+# (the failure is `NvvmSupportError: libNVVM cannot be found`). conda-forge's
+# numba pulls in the CUDA pieces already configured, which is why this image is
+# built on a conda base rather than by pip-installing CUDA wheels.
+#
+# Requirements on the host: an NVIDIA driver and the NVIDIA Container Toolkit,
+# and `--gpus all` on the run command. Without them the tool warns on stderr and
+# computes on the CPU, producing identical results.
+FROM mambaorg/micromamba:2-ubuntu24.04
+
+USER root
+WORKDIR /app
+
+# cuda-nvcc supplies libnvvm; cuda-version pins the toolkit to something the
+# host driver can serve (a 12.x driver cannot run 13.x code).
+RUN micromamba install -y -n base -c conda-forge \
+        python=3.12 \
+        numpy \
+        pandas \
+        numba \
+        cuda-nvcc \
+        cuda-version=12 \
+        pyarrow \
+        tqdm \
+        psutil \
+    && micromamba clean --all --yes
+
+ENV PATH=/opt/conda/bin:$PATH
+ENV NUMBA_CUDA_USE_NVIDIA_BINDING=0
+
+COPY cgmlst-dists.py /app/
+COPY entrypoint.sh /app/
+RUN chmod +x /app/entrypoint.sh
+
+ENTRYPOINT ["/app/entrypoint.sh"]

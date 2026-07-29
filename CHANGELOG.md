@@ -25,6 +25,12 @@
   nothing under `--silent` and exited successfully, so a pipeline could not
   detect the failure. Loading errors now always reach stderr and exit 1, missing
   arguments exit 2, and a failed calculation exits 1.
+- `Dockerfile.gpu`: an optional GPU-capable image recipe, not published to the
+  registry. Built on a conda base so conda-forge's numba supplies the CUDA
+  compiler that the slim Python image lacks; verified on an NVIDIA L4, where it
+  reports the device and produces a matrix byte-identical to the CPU path. It is
+  3.4 GB against 877 MB for the CPU-only image, which is why it is left for users
+  who actually need it to build themselves.
 - Documented what GPU acceleration actually requires per install route, after
   verifying each one: conda and from-source work with only an NVIDIA driver on the
   host (numba supplies the CUDA pieces), while the published Docker image cannot

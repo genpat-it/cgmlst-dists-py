@@ -2,6 +2,11 @@ name: CI
 
 # Runs on every push and pull request, so regressions surface before a release
 # rather than during one.
+# The repository default for workflow tokens is write; nothing here needs to
+# write, so it is narrowed to read for every job.
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -37,7 +42,9 @@ jobs:
       # immediately. The regression tests skip those files and still cover the
       # same code paths via boring/chewie/100. The full-size dataset is always
       # validated at release time, and on demand via the full_datasets input.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Fetch full-size reference datasets from Git LFS
         if: inputs.full_datasets
@@ -45,7 +52,7 @@ jobs:
           git lfs install
           git lfs pull --include="test/crc32.tab,validation/crc32_c.tab,validation/crc32_py.tab"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ matrix.python }}
 
@@ -71,14 +78,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # No LFS needed: the smoke tests use the small boring.tab dataset.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       # Required for the GHA cache backend: the default docker driver cannot
       # export a build cache.
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           load: true

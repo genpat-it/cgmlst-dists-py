@@ -4,6 +4,11 @@ on:
   release:
     types: [published]
 
+# Read-only by default; the docker job widens this to packages: write for the
+# registry push, and nothing else.
+permissions:
+  contents: read
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -12,7 +17,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Credentials are deliberately kept here: the Git LFS fetch below needs
+      # them, and dropping them would only surface as a failed release.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Fetch only the three LFS objects the regression tests need (~212 MiB)
       # rather than every LFS file in the repo (~333 MiB). A release should be
@@ -23,7 +30,7 @@ jobs:
           git lfs install
           git lfs pull --include="test/crc32.tab,validation/crc32_c.tab,validation/crc32_py.tab"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13"
 
@@ -64,14 +71,16 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       # Required for the GHA cache backend: the default docker driver cannot
       # export a build cache.
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -79,7 +88,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -91,7 +100,7 @@ jobs:
       # published. Pushing an image that cannot run is the one failure mode a
       # release must not have.
       - name: Build image for testing
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           load: true
@@ -106,7 +115,7 @@ jobs:
         run: test/smoke_image.sh cgmlst-dists-py:candidate "${GITHUB_REF_NAME#v}"
 
       - name: Push Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: true
