@@ -414,3 +414,29 @@ def test_successful_run_exits_zero(tmp_path):
     proc = run_raw("-i", REPO / "test" / "boring.tab", "-o", tmp_path / "o.tab", "-s")
     assert proc.returncode == 0
     assert proc.stderr == ""
+
+
+def test_header_only_input_is_rejected(tmp_path):
+    """Parses cleanly but holds no samples. This escaped detection on the Arrow
+    loader, which used to return before the validation ran."""
+    src = tmp_path / "hdr.tab"
+    src.write_text("id\tL1\tL2\n")
+    proc = run_raw("-i", src, "-c", "-s")
+    assert proc.returncode == 1
+    assert "no samples" in proc.stderr
+    assert proc.stdout == ""
+
+
+def test_locus_filter_output_matches_across_loaders(tmp_path):
+    """The Arrow loader now also serves -L/-S, so it must agree with pandas
+    there too. Runs whichever loader is installed; CI covers both."""
+    src = tmp_path / "in.tab"
+    v = profiles(30, 60, 0.25, seed=21)
+    lines = ["id\t" + "\t".join(f"L{i}" for i in range(v.shape[1]))]
+    for i, row in enumerate(v):
+        lines.append(f"S{i}\t" + "\t".join("-" if x == 0 else str(x) for x in row))
+    src.write_text("\n".join(lines) + "\n")
+    filtered = run_cli("-i", src, "-c", "-s", "-L", 80, "-S", 70)
+    # The filters must actually remove something, or the test proves nothing.
+    unfiltered = run_cli("-i", src, "-c", "-s")
+    assert len(filtered.splitlines()) < len(unfiltered.splitlines())

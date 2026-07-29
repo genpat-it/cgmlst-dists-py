@@ -12,6 +12,25 @@
   The Docker image no longer installs it separately, since requirements.txt
   covers it.
 
+### Performance
+- The Arrow loader is now used with `--locus-completeness`/`--sample-completeness`
+  as well. It had been gated on both filters being absent, on the grounds that
+  they "need the raw string data"; they do not, they count zeros on the numeric
+  frame, so anyone passing `-L`/`-S` was silently getting the 3-4x slower pandas
+  loader. The Arrow result was in fact computed and then discarded in that case,
+  because the pandas loader ran straight afterwards and overwrote it.
+
+### Fixed
+- The tool exited 0 when it produced no output. A missing input file reported
+  nothing under `--silent` and exited successfully, so a pipeline could not
+  detect the failure. Loading errors now always reach stderr and exit 1, missing
+  arguments exit 2, and a failed calculation exits 1.
+- Input that parses but contains no samples or no loci is rejected with a message
+  pointing at the likely cause (wrong `--input_sep`) instead of producing an empty
+  matrix. This also fixes a cryptic "zero-size array to reduction operation
+  maximum" on header-only input, and it now applies to the Arrow loader too,
+  which previously returned before the validation could run.
+
 ## [0.1.6] - 2026-07-29
 
 ### Added
