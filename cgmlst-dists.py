@@ -142,6 +142,25 @@ HANDLER_NAMES = {
     HANDLER_ABSOLUTE: "absolute_distance",
 }
 
+def deduplicate_profiles(values):
+    """Find identical allelic profiles.
+
+    Returns (labels, representatives): `labels[i]` is the index into
+    `representatives` of the profile of sample i, so the full matrix is recovered
+    with `dist[np.ix_(labels, labels)]`.
+
+    Rows are compared as opaque records so numpy does the work in C. That view
+    needs a C-contiguous array of a single dtype; np.unique(axis=0) is the
+    fallback when it cannot be taken (it is slower because it sorts whole rows).
+    """
+    v = np.ascontiguousarray(values)
+    try:
+        view = v.view([('', v.dtype)] * v.shape[1]).ravel()
+        _, reps, labels = np.unique(view, return_index=True, return_inverse=True)
+    except (ValueError, TypeError):
+        _, reps, labels = np.unique(v, axis=0, return_index=True, return_inverse=True)
+    return np.ravel(labels), reps
+
 def rescale_pair_delete(diff, comparable, n_loci):
     """GrapeTree's `pair_delete` rescaling: project the observed differences from
     the comparable loci onto the full locus set, so samples with many missing
@@ -995,6 +1014,10 @@ def main():
         parser.add_argument("-M", "--max_memory_gb", type=float, default=default_memory_gb, help=f"Maximum memory to use in GB for distance calculation (default: {default_memory_gb})")
         parser.add_argument("-k", "--chunk_size", type=int, default=1000, help="Size of chunks for reading/writing files")
         parser.add_argument("-n", "--missing_char", default="-", help="Character used for missing data (default: '-')")
+        parser.add_argument("-u", "--dedup", action="store_true",
+                          help="Collapse identical profiles, compute distances over the unique ones "
+                               "and expand the result. Exact, and much faster on clonal data; costs "
+                               "a few percent when there are no duplicates. Not compatible with -y 0")
         parser.add_argument("-y", "--missing-handler", type=int, choices=[0, 1, 2, 3], default=HANDLER_ABSOLUTE,
                           help="How to treat missing calls, numbered as in GrapeTree's -y flag. "
                                "0: pair_delete (ignore per pair, then rescale by n_loci/n_comparable); "
@@ -1095,6 +1118,17 @@ def main():
             sys.exit(1)
 
         handler = args.missing_handler
+        if args.dedup and handler == HANDLER_PAIR_DELETE:
+            # Under pair_delete two identical profiles are not necessarily at
+            # distance 0: round(0.01 * n_loci / (comparable + 0.01)) exceeds 0 when
+            # very few loci are called. Deduplication puts such pairs on the
+            # diagonal and reports 0, so the result would silently differ.
+            sys.stderr.write(
+                "ERROR: --dedup cannot be combined with -y 0 (pair_delete): under that "
+                "handler two identical profiles may be at non-zero distance, so collapsing "
+                "them would change the result. Drop --dedup, or use -y 3.\n"
+            )
+            sys.exit(2)
         if not args.silent and handler != HANDLER_ABSOLUTE:
             print(f"\nMissing-data handler: {handler} ({HANDLER_NAMES[handler]})")
 
@@ -1142,8 +1176,28 @@ def main():
         
         # Calculate distances and measure time
         calc_start_time = time.time()
-        distances = calculate_distances_batched(data, use_gpu, args.max_memory_gb, args.silent,
-                                               num_threads=num_threads, handler=handler)
+        if not args.dedup:
+            distances = calculate_distances_batched(data, use_gpu, args.max_memory_gb, args.silent,
+                                                   num_threads=num_threads, handler=handler)
+        else:
+            # Distances depend only on the pair of profiles, so identical profiles
+            # can be collapsed: compute the DxD matrix over unique profiles and
+            # expand it back. Exact for handlers 1, 2 and 3.
+            values = data.to_numpy()
+            labels, reps = deduplicate_profiles(values)
+            n_unique = len(reps)
+            if not args.silent:
+                print(f"Deduplication: {n_samples:,} samples -> {n_unique:,} unique profiles")
+            if n_unique == n_samples:
+                distances = calculate_distances_batched(data, use_gpu, args.max_memory_gb, args.silent,
+                                                       num_threads=num_threads, handler=handler)
+            else:
+                unique = calculate_distances_batched(
+                    pd.DataFrame(values[reps]), use_gpu, args.max_memory_gb, args.silent,
+                    num_threads=num_threads, handler=handler)
+                # Expansion still materializes the full NxN matrix, so this saves
+                # computation, not memory; the feasibility check above still applies.
+                distances = unique[np.ix_(labels, labels)] if unique is not None else None
         calc_end_time = time.time()
         calc_time = calc_end_time - calc_start_time
         

@@ -88,7 +88,7 @@ usage: cgmlst-dists.py [-h] [-i INPUT] [-o OUTPUT] [-r] [-d INPUT_SEP]
                        [-D OUTPUT_SEP] [-x INDEX_NAME]
                        [-m {full,lower-tri,upper-tri}] [-t NUM_THREADS]
                        [-j IO_THREADS] [-M MAX_MEMORY_GB] [-k CHUNK_SIZE]
-                       [-n MISSING_CHAR] [-y {0,1,2,3}]
+                       [-n MISSING_CHAR] [-u] [-y {0,1,2,3}]
                        [-L LOCUS_COMPLETENESS] [-S SAMPLE_COMPLETENESS] [-g]
                        [-b] [-s] [-c] [-f] [-V]
 
@@ -118,6 +118,10 @@ options:
                         Size of chunks for reading/writing files (default: 1000)
   -n, --missing_char MISSING_CHAR
                         Character used for missing data (default: '-')
+  -u, --dedup           Collapse identical profiles, compute distances over
+                        the unique ones and expand the result. Exact, and much
+                        faster on clonal data; costs a few percent when there
+                        are no duplicates. Not compatible with -y 0
   -y, --missing-handler {0,1,2,3}
                         How to treat missing calls, numbered as in GrapeTree's -y flag.
                         0: pair_delete, 1: complete_delete, 2: as_allele,
@@ -205,6 +209,32 @@ emitting an integer matrix of allele differences:
 
 If you need the handlers exactly as GrapeTree computes them, including its tree
 methods, see [`grapetree-rs`](https://github.com/genpat-it/grapetree-rs).
+
+### Deduplication
+
+Distances depend only on the pair of profiles, so identical profiles can be
+collapsed: `-u/--dedup` computes the matrix over the unique profiles and expands
+it back. The result is **exact**, not approximate.
+
+```bash
+python cgmlst-dists.py -i input.tsv -o output.tsv --dedup
+```
+
+Worth it on clonal data, which is common in surveillance: 2000 samples with 200
+distinct profiles compute 4.5x faster, 4000 with 400 distinct 5x. With no
+duplicates at all it costs about 8%, since the profiles still have to be compared
+once; detection itself is 13-51 ms on those inputs.
+
+Two caveats:
+
+- It saves computation, not memory. The expansion still materializes the full
+  N x N matrix, so the up-front feasibility check applies exactly as before.
+- It cannot be combined with `-y 0` (`pair_delete`), and the tool refuses the
+  combination rather than returning different numbers. Under that handler two
+  identical profiles are not necessarily at distance 0: the rescaling is
+  `round(0.01 * n_loci / (comparable + 0.01))`, which exceeds 0 when very few
+  loci are called, and collapsing such profiles onto the diagonal would report 0
+  instead.
 
 ### Data Filtering
 

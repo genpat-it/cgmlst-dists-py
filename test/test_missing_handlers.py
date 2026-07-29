@@ -466,3 +466,68 @@ def test_gpu_request_without_cuda_warns(monkeypatch, tmp_path):
     assert "WARNING" in proc.stderr and "--gpu" in proc.stderr
     # The matrix must still be correct.
     assert proc.stdout == (REPO / "validation" / "boring_c.tab").read_text()
+
+
+# --------------------------------------------------------------------------
+# Profile deduplication (--dedup)
+# --------------------------------------------------------------------------
+
+def clonal_input(path, n_samples, n_loci, n_unique, missing_rate, seed):
+    """Write a TSV where only n_unique distinct profiles occur."""
+    rng = np.random.default_rng(seed)
+    base = rng.integers(1, 40, size=(n_unique, n_loci)).astype(np.int32)
+    if missing_rate:
+        base[rng.random(base.shape) < missing_rate] = 0
+    idx = np.concatenate([np.arange(n_unique),
+                          rng.integers(0, n_unique, size=n_samples - n_unique)])
+    v = base[idx]
+    lines = ["id\t" + "\t".join(f"L{i}" for i in range(n_loci))]
+    for i, row in enumerate(v):
+        lines.append(f"S{i}\t" + "\t".join("-" if x == 0 else str(x) for x in row))
+    path.write_text("\n".join(lines) + "\n")
+    return v
+
+
+@pytest.mark.parametrize("handler", [1, 2, 3])
+@pytest.mark.parametrize("missing_rate", [0.0, 0.2])
+def test_dedup_output_is_exact(tmp_path, handler, missing_rate):
+    """Deduplication is an optimization: the matrix must be byte-identical."""
+    src = tmp_path / "clonal.tab"
+    clonal_input(src, 60, 40, 15, missing_rate, seed=31 + handler)
+    plain = run_cli("-i", src, "-c", "-s", "-y", handler)
+    deduped = run_cli("-i", src, "-c", "-s", "-y", handler, "-u")
+    assert plain == deduped
+
+
+def test_dedup_is_exact_with_no_duplicates(tmp_path):
+    """The all-unique case must fall through without changing the result."""
+    src = tmp_path / "unique.tab"
+    clonal_input(src, 40, 30, 40, 0.15, seed=7)
+    assert run_cli("-i", src, "-c", "-s") == run_cli("-i", src, "-c", "-s", "-u")
+
+
+def test_dedup_refuses_pair_delete(tmp_path):
+    """-y 0 is not exact under deduplication, so the combination is rejected
+    rather than silently producing different numbers."""
+    src = tmp_path / "clonal.tab"
+    clonal_input(src, 20, 20, 5, 0.2, seed=3)
+    proc = run_raw("-i", src, "-c", "-s", "-y", 0, "-u")
+    assert proc.returncode == 2
+    assert "--dedup" in proc.stderr and "-y 0" in proc.stderr
+    assert proc.stdout == ""
+
+
+def test_dedup_reports_how_many_profiles_collapsed(tmp_path):
+    src = tmp_path / "clonal.tab"
+    clonal_input(src, 50, 25, 10, 0.0, seed=11)
+    proc = run_raw("-i", src, "-c", "-u")
+    assert proc.returncode == 0
+    assert "50" in proc.stderr and "10 unique" in proc.stderr
+
+
+def test_dedup_preserves_sample_order(tmp_path):
+    """Rows must stay in input order, not in the order of unique profiles."""
+    src = tmp_path / "clonal.tab"
+    clonal_input(src, 30, 20, 6, 0.1, seed=5)
+    rows = [l.split("\t")[0] for l in run_cli("-i", src, "-c", "-s", "-u").strip().splitlines()]
+    assert rows[1:] == [f"S{i}" for i in range(30)]
