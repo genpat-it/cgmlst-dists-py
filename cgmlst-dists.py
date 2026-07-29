@@ -28,6 +28,68 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 DEFAULT_THREADS = max(1, os.cpu_count() // 2)
 VERSION = "0.1.6"
 
+# Missing-data handlers, numbered as in GrapeTree's `--missing/-y` flag so the
+# two tools can be compared. All four operate on the same pairwise Hamming
+# comparison and differ only in how absent calls are treated.
+#   0 pair_delete       ignore missing per pair, then rescale the count to the
+#                       full locus set: (diff + 0.01) * n_loci / (comparable + 0.01)
+#   1 complete_delete   drop every locus not called in all samples, then count
+#   2 as_allele         treat "missing" as a regular allele value
+#   3 absolute_distance ignore missing per pair, absolute count (DEFAULT here,
+#                       and the semantics of the original C cgmlst-dists)
+#
+# Two deliberate differences from GrapeTree, both because this tool emits an
+# integer allele-difference matrix:
+#   * GrapeTree's `-m distance` divides the result by the locus count for
+#     handlers 0, 1 and 2 (MSTrees.py:496), so it prints fractions there; we
+#     report counts for every handler. To compare, multiply its output by the
+#     number of loci: ours == round(grapetree_value * n_loci).
+#   * Handler 1 implements the *documented* behaviour ("remove column with
+#     missing data"). GrapeTree's own implementation inverts the condition and
+#     keeps only the columns that DO contain a missing call
+#     (MSTrees.py:627, `np.sum(encoded_profile == 0, 0) > 0`), which collapses
+#     its `-y 1` distances to ~0. We do not reproduce that bug.
+HANDLER_PAIR_DELETE = 0
+HANDLER_COMPLETE_DELETE = 1
+HANDLER_AS_ALLELE = 2
+HANDLER_ABSOLUTE = 3
+HANDLER_NAMES = {
+    HANDLER_PAIR_DELETE: "pair_delete",
+    HANDLER_COMPLETE_DELETE: "complete_delete",
+    HANDLER_AS_ALLELE: "as_allele",
+    HANDLER_ABSOLUTE: "absolute_distance",
+}
+
+def rescale_pair_delete(diff, comparable, n_loci):
+    """GrapeTree's `pair_delete` rescaling: project the observed differences from
+    the comparable loci onto the full locus set, so samples with many missing
+    calls are not made to look artificially similar. The 0.01 terms are
+    GrapeTree's guard against a zero denominator and are reproduced as-is (a
+    pair with no comparable locus at all therefore rescales to n_loci). The
+    rounding to an integer is ours, since this tool emits an integer matrix."""
+    scaled = (diff.astype(np.float64) + 0.01) * float(n_loci) / (comparable.astype(np.float64) + 0.01)
+    return np.rint(scaled).astype(np.int32)
+
+def drop_incomplete_loci(data, silent=False):
+    """`complete_delete`: keep only loci called in every sample. This is exactly
+    the locus set `--locus-completeness 100` keeps, applied here so the handler
+    works independently of the completeness filters."""
+    keep = (data.values != 0).all(axis=0)
+    n_dropped = int((~keep).sum())
+    if not silent:
+        print(f"Missing handler 'complete_delete': dropped {n_dropped} of "
+              f"{data.shape[1]} loci with at least one missing call")
+    if not keep.any():
+        # A single all-missing sample is enough to empty the whole schema, and
+        # the result would be an all-zero matrix with no other clue why.
+        # Warn on stderr even when silent, since the output is meaningless.
+        sys.stderr.write(
+            "WARNING: 'complete_delete' removed every locus, so all distances will be 0. "
+            "At least one sample has no call in common with the rest; drop it "
+            "(e.g. --sample-completeness) or use a different --missing-handler.\n"
+        )
+    return data.loc[:, keep]
+
 def filter_loci_by_completeness(data: pd.DataFrame, missing_char: str, min_completeness: float, silent: bool = False) -> tuple[list, dict]:
     """Filter loci based on completeness threshold."""
     total = len(data)
@@ -326,14 +388,21 @@ def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replac
             print(f"Error loading data: {e}")
         return None, None, None
 
-def calculate_hamming_distances_numpy(values, num_threads=None, silent=False):
+def calculate_hamming_distances_numpy(values, num_threads=None, silent=False,
+                                      handler=HANDLER_ABSOLUTE):
     """Calculate Hamming distances using numpy vectorized operations with threading."""
     n_samples = values.shape[0]
+    n_loci = values.shape[1]
     mask = values != 0  # (N, L) boolean - precompute once
     distances = np.zeros((n_samples, n_samples), dtype=np.int32)
 
     if num_threads is None:
         num_threads = os.cpu_count() or 1
+
+    # `as_allele` compares 0 like any other value, so no mask is needed at all;
+    # `pair_delete` additionally needs the per-pair comparable-locus count.
+    as_allele = handler == HANDLER_AS_ALLELE
+    rescale = handler == HANDLER_PAIR_DELETE
 
     # Fast path when there is no missing data: skip the both-valid masking
     # entirely (one boolean array per row instead of three).
@@ -344,9 +413,20 @@ def calculate_hamming_distances_numpy(values, num_threads=None, silent=False):
             return
         rest_values = values[i + 1:]  # (N-i-1, L)
         different = values[i] != rest_values  # broadcast
+        if as_allele:
+            distances[i, i + 1:] = different.sum(axis=1)
+            return
+        both = None
         if has_missing:
-            different &= mask[i] & mask[i + 1:]
-        distances[i, i + 1:] = different.sum(axis=1)
+            both = mask[i] & mask[i + 1:]
+            different &= both
+        diff = different.sum(axis=1)
+        if rescale:
+            # With no missing data every locus is comparable, so the count is
+            # constant and the mask was never materialized.
+            comparable = both.sum(axis=1) if both is not None else np.full(diff.shape, n_loci)
+            diff = rescale_pair_delete(diff, comparable, n_loci)
+        distances[i, i + 1:] = diff
 
     # numpy releases GIL so threads parallelize well
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
@@ -355,28 +435,49 @@ def calculate_hamming_distances_numpy(values, num_threads=None, silent=False):
 
     return distances
 
-@jit(nopython=True, parallel=True, fastmath=True, cache=True)
-def calculate_hamming_distances_numba(values):
-    """Calculate Hamming distances between all pairs of samples (fallback)."""
+@jit(nopython=True, parallel=True, cache=True)
+def calculate_hamming_distances_numba(values, as_allele=False, rescale=False):
+    """Calculate Hamming distances between all pairs of samples (fallback).
+
+    `fastmath` is deliberately not enabled: the `pair_delete` rescaling is a
+    division whose result gets rounded, so relaxed floating-point semantics
+    could flip a tie and change the reported distance."""
     n_samples = values.shape[0]
+    n_loci = values.shape[1]
     distances = np.zeros((n_samples, n_samples), dtype=np.int32)
 
     for i in prange(n_samples):
         for j in range(i + 1, n_samples):
             dist = 0
-            for k in range(values.shape[1]):
+            comparable = 0
+            for k in range(n_loci):
                 vi = values[i, k]
                 vj = values[j, k]
-                if vi != 0 and vj != 0 and vi != vj:
-                    dist += 1
+                if as_allele:
+                    if vi != vj:
+                        dist += 1
+                elif vi != 0 and vj != 0:
+                    comparable += 1
+                    if vi != vj:
+                        dist += 1
 
-            distances[i, j] = dist
+            if rescale:
+                scaled = (dist + 0.01) * n_loci / (comparable + 0.01)
+                distances[i, j] = int(np.rint(scaled))
+            else:
+                distances[i, j] = dist
 
     return distances
 
 @cuda.jit
-def calculate_hamming_distances_cuda_kernel(values, distances, start_i, start_j):
-    """CUDA kernel function for calculating Hamming distances."""
+def calculate_hamming_distances_cuda_kernel(values, distances, counts, start_i, start_j,
+                                            as_allele, rescale):
+    """CUDA kernel function for calculating Hamming distances.
+
+    For `pair_delete` the kernel only reports the raw difference count and the
+    number of comparable loci; the rescaling itself is done on the host, so the
+    GPU and CPU paths round identically instead of relying on device float
+    semantics matching numpy's."""
     i, j = cuda.grid(2)
 
     dist_i_size = distances.shape[0]
@@ -388,15 +489,23 @@ def calculate_hamming_distances_cuda_kernel(values, distances, start_i, start_j)
 
         if real_i < real_j:
             dist = 0
+            comparable = 0
             n_loci = values.shape[1]
 
             for k in range(n_loci):
                 vi = values[real_i, k]
                 vj = values[real_j, k]
-                if vi != 0 and vj != 0 and vi != vj:
-                    dist += 1
+                if as_allele:
+                    if vi != vj:
+                        dist += 1
+                elif vi != 0 and vj != 0:
+                    comparable += 1
+                    if vi != vj:
+                        dist += 1
 
             distances[i, j] = dist
+            if rescale:
+                counts[i, j] = comparable
 
 def estimate_gpu_batch_size(n_samples, n_loci, silent=False):
     """Estimate optimal batch size based on available GPU memory."""
@@ -417,8 +526,39 @@ def estimate_gpu_batch_size(n_samples, n_loci, silent=False):
 
     return batch_size
 
-def calculate_hamming_distances_cuda_batch(values, start_i, end_i, start_j, end_j, silent=False):
+def calculate_distances_cpu_batch(values, start_i, end_i, start_j, end_j,
+                                  handler=HANDLER_ABSOLUTE):
+    """Compute one (i, j) block of the upper triangle on the CPU, used as the
+    fallback when a CUDA batch fails."""
+    n_loci = values.shape[1]
+    as_allele = handler == HANDLER_AS_ALLELE
+    rescale = handler == HANDLER_PAIR_DELETE
+    block = np.zeros((end_i - start_i, end_j - start_j), dtype=np.int32)
+
+    for ii in range(end_i - start_i):
+        ri = start_i + ii
+        row = values[ri]
+        lo = max(start_j, ri + 1)
+        if lo >= end_j:
+            continue
+        rest = values[lo:end_j]
+        different = row != rest
+        if as_allele:
+            block[ii, lo - start_j:] = different.sum(axis=1)
+            continue
+        both = (row != 0) & (rest != 0)
+        diff = (different & both).sum(axis=1)
+        if rescale:
+            diff = rescale_pair_delete(diff, both.sum(axis=1), n_loci)
+        block[ii, lo - start_j:] = diff
+
+    return block
+
+def calculate_hamming_distances_cuda_batch(values, start_i, end_i, start_j, end_j,
+                                           silent=False, handler=HANDLER_ABSOLUTE):
     """Calculate distances for a batch of samples using CUDA."""
+    as_allele = handler == HANDLER_AS_ALLELE
+    rescale = handler == HANDLER_PAIR_DELETE
     try:
         batch_i_size = end_i - start_i
         batch_j_size = end_j - start_j
@@ -428,6 +568,13 @@ def calculate_hamming_distances_cuda_batch(values, start_i, end_i, start_j, end_
         distances_device = cuda.device_array((batch_i_size, batch_j_size), dtype=np.int32)
         # Zero-initialize
         distances_device[:] = 0
+        # `pair_delete` needs the comparable-locus count per pair; every other
+        # handler does not, so only a 1x1 placeholder is allocated for them.
+        # Pre-filled with -1 so cells outside the strict upper triangle stay
+        # distinguishable from a genuine "zero comparable loci" pair, which
+        # rescales to n_loci rather than staying 0.
+        counts_shape = (batch_i_size, batch_j_size) if rescale else (1, 1)
+        counts_device = cuda.to_device(np.full(counts_shape, -1, dtype=np.int32))
 
         # Use 32x32 thread blocks for better occupancy
         threads_per_block = (32, 32)
@@ -436,17 +583,29 @@ def calculate_hamming_distances_cuda_batch(values, start_i, end_i, start_j, end_
         blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
 
         calculate_hamming_distances_cuda_kernel[blocks_per_grid, threads_per_block](
-            values_device, distances_device, start_i, start_j
+            values_device, distances_device, counts_device, start_i, start_j,
+            as_allele, rescale
         )
 
         cuda.synchronize()
         batch_distances = distances_device.copy_to_host()
 
+        if rescale:
+            comparable = counts_device.copy_to_host()
+            # Only the strict upper triangle was written; rescaling the zeroed
+            # remainder would turn it into a positive value, so restrict the
+            # transform to the cells the kernel actually filled.
+            written = comparable >= 0
+            if written.any():
+                batch_distances[written] = rescale_pair_delete(
+                    batch_distances[written], comparable[written], values.shape[1]
+                )
+
         return batch_distances
     except Exception as e:
         if not silent:
             print(f"CUDA batch error: {e}, falling back to CPU")
-        return calculate_hamming_distances_numba_batch(values, start_i, end_i, start_j, end_j)
+        return calculate_distances_cpu_batch(values, start_i, end_i, start_j, end_j, handler)
 
 def calculate_distances_batched(data, use_gpu=False, max_memory_gb=8, silent=False, **kwargs):
     """Calculate distances in batches to manage memory usage."""
@@ -454,12 +613,13 @@ def calculate_distances_batched(data, use_gpu=False, max_memory_gb=8, silent=Fal
         values = data.values
         n_samples = values.shape[0]
         num_threads = kwargs.get('num_threads', os.cpu_count() or 1)
+        handler = kwargs.get('handler', HANDLER_ABSOLUTE)
 
         # CPU path: use numpy vectorized approach (no batching needed)
         if not use_gpu:
             if not silent:
                 print(f"Using numpy vectorized calculation with {num_threads} threads")
-            distances = calculate_hamming_distances_numpy(values, num_threads, silent)
+            distances = calculate_hamming_distances_numpy(values, num_threads, silent, handler)
             distances += distances.T
             return distances
 
@@ -469,11 +629,11 @@ def calculate_distances_batched(data, use_gpu=False, max_memory_gb=8, silent=Fal
             if not silent:
                 print("Small dataset detected, using direct calculation without batching")
             try:
-                result = calculate_hamming_distances_cuda_batch(values, 0, n_samples, 0, n_samples, silent)
+                result = calculate_hamming_distances_cuda_batch(values, 0, n_samples, 0, n_samples, silent, handler)
             except:
                 if not silent:
                     print("GPU calculation failed, falling back to CPU")
-                result = calculate_hamming_distances_numpy(values, num_threads, silent)
+                result = calculate_hamming_distances_numpy(values, num_threads, silent, handler)
             result += result.T
             return result
 
@@ -500,23 +660,14 @@ def calculate_distances_batched(data, use_gpu=False, max_memory_gb=8, silent=Fal
 
                     try:
                         batch_distances = calculate_hamming_distances_cuda_batch(
-                            values, i_start, i_end, j_start, j_end, silent
+                            values, i_start, i_end, j_start, j_end, silent, handler
                         )
                     except:
                         if not silent:
                             print("GPU batch failed, falling back to CPU for this batch")
-                        # Fallback: compute this batch with numpy
-                        batch_i = end_i - start_i
-                        batch_j = end_j - start_j
-                        sub_distances = np.zeros((batch_i, batch_j), dtype=np.int32)
-                        for ii in range(batch_i):
-                            ri = i_start + ii
-                            for jj in range(batch_j):
-                                rj = j_start + jj
-                                if ri < rj:
-                                    both = (values[ri] != 0) & (values[rj] != 0)
-                                    sub_distances[ii, jj] = ((values[ri] != values[rj]) & both).sum()
-                        batch_distances = sub_distances
+                        batch_distances = calculate_distances_cpu_batch(
+                            values, i_start, i_end, j_start, j_end, handler
+                        )
                     
                     # Copy the batch results to the full distance matrix (upper triangle)
                     distances[i_start:i_end, j_start:j_end] = batch_distances
@@ -804,6 +955,14 @@ def main():
         parser.add_argument("-M", "--max_memory_gb", type=float, default=default_memory_gb, help=f"Maximum memory to use in GB for distance calculation (default: {default_memory_gb})")
         parser.add_argument("-k", "--chunk_size", type=int, default=1000, help="Size of chunks for reading/writing files")
         parser.add_argument("-n", "--missing_char", default="-", help="Character used for missing data (default: '-')")
+        parser.add_argument("-y", "--missing-handler", type=int, choices=[0, 1, 2, 3], default=HANDLER_ABSOLUTE,
+                          help="How to treat missing calls, numbered as in GrapeTree's -y flag. "
+                               "0: pair_delete (ignore per pair, then rescale by n_loci/n_comparable); "
+                               "1: complete_delete (drop loci not called in all samples, per GrapeTree's "
+                               "documented behaviour rather than its inverted implementation); "
+                               "2: as_allele (missing is a regular allele); "
+                               "3: absolute_distance (ignore per pair, absolute count) "
+                               f"(default: {HANDLER_ABSOLUTE}, matching the original C cgmlst-dists)")
         parser.add_argument("-L", "--locus-completeness", type=float, default=None,
                           help="Minimum percentage of non-missing data required for a locus (0-100)")
         parser.add_argument("-S", "--sample-completeness", type=float, default=None,
@@ -873,6 +1032,16 @@ def main():
         if data is None:
             return
 
+        handler = args.missing_handler
+        if not args.silent and handler != HANDLER_ABSOLUTE:
+            print(f"\nMissing-data handler: {handler} ({HANDLER_NAMES[handler]})")
+
+        # `complete_delete` is a locus-set restriction rather than a change to
+        # the pairwise comparison, so it is applied once here; the kernels then
+        # run on data with no missing calls left.
+        if handler == HANDLER_COMPLETE_DELETE:
+            data = drop_incomplete_loci(data, args.silent)
+
         n_samples = data.shape[0]
 
         # Fail fast BEFORE the (potentially long) distance computation.
@@ -911,7 +1080,8 @@ def main():
         
         # Calculate distances and measure time
         calc_start_time = time.time()
-        distances = calculate_distances_batched(data, use_gpu, args.max_memory_gb, args.silent, num_threads=num_threads)
+        distances = calculate_distances_batched(data, use_gpu, args.max_memory_gb, args.silent,
+                                               num_threads=num_threads, handler=handler)
         calc_end_time = time.time()
         calc_time = calc_end_time - calc_start_time
         

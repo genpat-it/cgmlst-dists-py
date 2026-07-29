@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+# numba on-disk compilation cache (cache=True)
+*.nbc
+*.nbi
+.pytest_cache/

@@ -2,6 +2,32 @@
 
 ## [Unreleased] - 0.1.6
 
+### Added
+- `-y/--missing-handler`: four policies for missing allele calls, numbered as in
+  GrapeTree's `-y` flag so the two tools can be compared.
+  - `0` `pair_delete`: ignore missing loci per pair, then rescale the count to
+    the full locus set (`(diff + 0.01) * n_loci / (comparable + 0.01)`, rounded).
+  - `1` `complete_delete`: drop every locus not called in all samples.
+  - `2` `as_allele`: treat "missing" as a regular allele value.
+  - `3` `absolute_distance`: ignore missing loci per pair, absolute count.
+
+  **The default is `3`, which is the previous (and only) behaviour**, so output
+  is unchanged unless `-y` is passed explicitly. Note that GrapeTree defaults to
+  `0`, which inflates distances by `n_loci / n_comparable`; the two tools
+  therefore do not agree out of the box, and thresholds tuned on GrapeTree
+  defaults do not transfer. Supported on the CPU, GPU and block-fallback paths.
+
+  Two deliberate departures from GrapeTree, both because this tool emits an
+  integer matrix: its `--method distance` divides by the locus count for
+  handlers `0`, `1` and `2` (we always report counts), and its `complete_delete`
+  implementation inverts the column test, keeping only the columns that *do*
+  contain a missing call — we implement the documented behaviour instead.
+  Requested in #3.
+- `test/test_missing_handlers.py`: pytest suite covering the handlers (known
+  values, cross-agreement of the numpy/numba/block-fallback/GPU paths,
+  invariants, CLI behaviour) plus regression tests pinning the default output
+  against both the stored `validation/` matrices and the C implementation's.
+
 ### Performance
 - Optional Arrow-based loader: when `pyarrow` is installed, the read + numeric
   conversion is done with Arrow compute kernels (multithreaded C++), ~3-4x
@@ -33,8 +59,16 @@
   materializes the whole matrix as strings (`distances.astype(str)`), matching
   the row-by-row streaming already used for stdout — avoids the large-matrix
   memory blow-up.
+- GPU batch fallback: when a CUDA batch failed, the CPU fallback raised
+  `NameError` instead of computing the batch (an undefined
+  `calculate_hamming_distances_numba_batch`, and undefined `start_i`/`end_i` in
+  the batched loop). Both now call a shared `calculate_distances_cpu_batch`.
 
-_All changes above are output-preserving: results are byte-identical to 0.1.5._
+_Output is unchanged for a default invocation: results are byte-identical to
+0.1.5, and to the C `cgmlst-dists`, on the `validation/` datasets. The two
+exceptions are deliberate: `--locus-completeness`/`--sample-completeness` now
+actually filter (they were a no-op), and `-y` other than the default `3` selects
+a different metric._
 
 ## [0.1.5] - 2026-07-21
 

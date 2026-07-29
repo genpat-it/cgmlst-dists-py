@@ -47,7 +47,7 @@ For GPU support, make sure you have a compatible CUDA Toolkit installed.
 
 This is an enhanced Python implementation of `cgmlst-dists` originally developed by Torsten Seemann. It's designed for calculating pairwise Hamming distances for genome profiles in core genome multilocus sequence typing (cgMLST) schemas.
 
-Key features in this version (0.1.3):
+Key features in this version (0.1.6):
 
 - **GPU Acceleration**: Optional CUDA GPU support for dramatically faster calculations (up to 123x speedup)
 - **Vectorized CPU Computation**: NumPy-based vectorized distance calculation with multi-threaded parallelism
@@ -55,6 +55,7 @@ Key features in this version (0.1.3):
 - **Multithreaded Processing**: Parallelized calculations across CPU cores (numpy releases the GIL)
 - **Intelligent I/O**: Chunked file operations for better performance with large files
 - **Advanced Filtering**: Quality control via loci and sample completeness thresholds
+- **Missing-Data Handlers**: Four policies for absent allele calls (`-y`), numbered as in GrapeTree
 - **Automatic System Detection**: Optimizes settings based on available hardware
 - **Binary Output Option**: For extremely large matrices
 
@@ -68,8 +69,9 @@ usage: cgmlst-dists.py [-h] [-i INPUT] [-o OUTPUT] [-r] [-d INPUT_SEP]
                        [-D OUTPUT_SEP] [-x INDEX_NAME]
                        [-m {full,lower-tri,upper-tri}] [-t NUM_THREADS]
                        [-j IO_THREADS] [-M MAX_MEMORY_GB] [-k CHUNK_SIZE]
-                       [-n MISSING_CHAR] [-L LOCUS_COMPLETENESS]
-                       [-S SAMPLE_COMPLETENESS] [-g] [-b] [-s] [-c] [-f] [-V]
+                       [-n MISSING_CHAR] [-y {0,1,2,3}]
+                       [-L LOCUS_COMPLETENESS] [-S SAMPLE_COMPLETENESS] [-g]
+                       [-b] [-s] [-c] [-f] [-V]
 
 Calculate pairwise Hamming distances.
 
@@ -97,6 +99,10 @@ options:
                         Size of chunks for reading/writing files (default: 1000)
   -n, --missing_char MISSING_CHAR
                         Character used for missing data (default: '-')
+  -y, --missing-handler {0,1,2,3}
+                        How to treat missing calls, numbered as in GrapeTree's -y flag.
+                        0: pair_delete, 1: complete_delete, 2: as_allele,
+                        3: absolute_distance (default: 3, matching the original C cgmlst-dists)
   -L, --locus-completeness LOCUS_COMPLETENESS
                         Minimum percentage of non-missing data required for a locus (0-100)
   -S, --sample-completeness SAMPLE_COMPLETENESS
@@ -129,6 +135,55 @@ python cgmlst-dists.py -i input.tsv -c -m lower-tri -t 8 > distances.tsv
 python cgmlst-dists.py --input input.tsv --output output.tsv --gpu
 ```
 
+### Missing Data
+
+A locus with no call (`-` by default, see `-n/--missing_char`) is stored
+internally as `0`, so an allele literally named `0` cannot be represented. Note
+that any value that is not a positive integer is also treated as missing.
+
+`-y/--missing-handler` selects how those absent calls affect the distance. The
+numbering follows GrapeTree's `-y` flag so the two tools can be compared:
+
+| `-y` | Name | Behaviour |
+|------|------|-----------|
+| `0` | `pair_delete` | Ignore missing loci per pair, then rescale the count to the full locus set: `(diff + 0.01) * n_loci / (comparable + 0.01)`, rounded |
+| `1` | `complete_delete` | Drop every locus not called in all samples, then count |
+| `2` | `as_allele` | Treat "missing" as a regular allele: missing vs. called counts as a difference, missing vs. missing does not |
+| `3` | `absolute_distance` | Ignore missing loci per pair, report the absolute count — **default** |
+
+The default is `3`, which is the semantics of the original
+[`cgmlst-dists`](https://github.com/tseemann/cgmlst-dists) and keeps the output
+byte-identical to it. **GrapeTree defaults to `0` instead**, so the two tools do
+not agree out of the box: `pair_delete` inflates distances by
+`n_loci / n_comparable`, which grows with the amount of missing data (roughly
+×1.2 at 10% missing per sample, ×1.6 at 20%). Clustering thresholds tuned on
+GrapeTree defaults therefore do not transfer unchanged.
+
+```bash
+# Absolute allelic differences (default)
+python cgmlst-dists.py -i input.tsv -o output.tsv
+
+# GrapeTree's default policy instead
+python cgmlst-dists.py -i input.tsv -o output.tsv -y 0
+
+# Only loci called in every sample
+python cgmlst-dists.py -i input.tsv -o output.tsv -y 1
+```
+
+Two deliberate differences from GrapeTree, both consequences of this tool
+emitting an integer matrix of allele differences:
+
+- GrapeTree's `--method distance` divides the result by the locus count for
+  handlers `0`, `1` and `2`, so it prints fractions there while we always print
+  counts. To compare, multiply its values by the number of loci.
+- Handler `1` implements GrapeTree's *documented* behaviour ("remove column with
+  missing data"). GrapeTree's own implementation inverts the test and keeps only
+  the columns that **do** contain a missing call, which collapses its `-y 1`
+  distances to nearly zero; we do not reproduce that bug.
+
+If you need the handlers exactly as GrapeTree computes them, including its tree
+methods, see [`grapetree-rs`](https://github.com/genpat-it/grapetree-rs).
+
 ### Data Filtering
 
 Filter both loci and samples to include only those with ≥90% data completeness:
@@ -136,6 +191,10 @@ Filter both loci and samples to include only those with ≥90% data completeness
 ```bash
 python cgmlst-dists.py --input input.tsv --output output.tsv --locus-completeness 90 --sample-completeness 90
 ```
+
+`--locus-completeness 100` keeps exactly the loci that `-y 1` keeps, so the two
+routes produce the same matrix; the filter also accepts looser thresholds, and
+`--sample-completeness` has no GrapeTree equivalent.
 
 ### Handling Large Datasets
 
