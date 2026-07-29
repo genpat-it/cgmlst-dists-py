@@ -13,8 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true   # reference matrices for the regression tests
+
+      # Fetch only the three LFS objects the regression tests need (~212 MiB)
+      # rather than every LFS file in the repo (~333 MiB). A release should be
+      # validated against the full-size dataset, but not at the cost of the
+      # monthly LFS bandwidth quota.
+      - name: Fetch reference datasets from Git LFS
+        run: |
+          git lfs install
+          git lfs pull --include="test/crc32.tab,validation/crc32_c.tab,validation/crc32_py.tab"
 
       - uses: actions/setup-python@v5
         with:
@@ -27,6 +34,19 @@ jobs:
 
       - name: Run test suite
         run: pytest test/ -v
+
+      - name: Verify the full-size dataset was actually validated
+        # If the LFS pull silently failed, the crc32 regression tests would skip
+        # and the release would look green without having been checked against
+        # the large dataset.
+        run: |
+          set -euo pipefail
+          pytest test/ -q -k "crc32" --no-header -rs > result.txt 2>&1 || true
+          cat result.txt
+          if grep -qE "skipped" result.txt; then
+            echo "::error::crc32 regression tests skipped; Git LFS objects were not fetched"
+            exit 1
+          fi
 
       - name: Check that the reported version matches the tag
         # The Bioconda recipe tests `--version | grep <tag>`, so a mismatch

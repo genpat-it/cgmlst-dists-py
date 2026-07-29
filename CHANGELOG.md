@@ -30,8 +30,11 @@
 - Continuous integration (`.github/workflows/ci.yml`): the test suite now runs on
   every push and pull request, not only at release time, across Python 3.11/3.13
   and with and without `pyarrow` (the optional loader replaces the whole input
-  path, so both configurations must agree). Reference datasets are fetched from
-  Git LFS so their regression tests cannot silently skip.
+  path, so both configurations must agree). The ~333 MiB of Git LFS datasets are
+  not fetched there, to stay within the LFS bandwidth quota; the full-size
+  `crc32` dataset is validated at release time, where the workflow also fails if
+  those regression tests skip because the LFS objects did not arrive. It can be
+  run on demand from the CI workflow via the `full_datasets` input.
 - The Docker image is now built and executed in CI and, at release time, is
   smoke-tested **before** being pushed: reported version against the tag, output
   byte-identical to the C reference, a run under an arbitrary UID (numba's cache
