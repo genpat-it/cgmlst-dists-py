@@ -25,6 +25,16 @@
   nothing under `--silent` and exited successfully, so a pipeline could not
   detect the failure. Loading errors now always reach stderr and exit 1, missing
   arguments exit 2, and a failed calculation exits 1.
+- Documented what GPU acceleration actually requires per install route, after
+  verifying each one: conda and from-source work with only an NVIDIA driver on the
+  host (numba supplies the CUDA pieces), while the published Docker image cannot
+  use the GPU even with `--gpus all`, because `libnvvm.so` (the NVVM compiler
+  numba needs to build kernels at runtime) is not in the image. The README
+  previously advertised a `--gpus all` Docker command that cannot work.
+- `--gpu` on a machine without a usable CUDA device fell back to the CPU
+  silently, so a user who believed they were running on the GPU had no way to
+  tell (the only clue, `GPU available: No`, was hidden by `--silent`). It now
+  warns on stderr, always, and names what is missing.
 - Input that parses but contains no samples or no loci is rejected with a message
   pointing at the likely cause (wrong `--input_sep`) instead of producing an empty
   matrix. This also fixes a cryptic "zero-size array to reduction operation

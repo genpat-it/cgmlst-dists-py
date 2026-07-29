@@ -45,7 +45,21 @@ more slowly.
 pip install numpy pandas numba tqdm psutil
 ```
 
-For GPU support, make sure you have a compatible CUDA Toolkit installed.
+### GPU support
+
+GPU acceleration needs an NVIDIA driver on the host. The CUDA components
+themselves come with numba, so no separate toolkit install is required.
+
+| Install route | `--gpu` |
+|---|---|
+| Bioconda | supported — needs only an NVIDIA driver on the host |
+| From source | supported — needs only an NVIDIA driver on the host |
+| Docker image | **not supported**: the image lacks the CUDA compiler, see [GPU support in Docker](#gpu-support-in-docker) |
+
+Passing `--gpu` without a usable device is not an error: the tool warns on stderr
+and computes on the CPU, producing identical results. Verified on an NVIDIA L4
+(driver 590.48, compute capability 8.9), where the GPU and CPU matrices are
+byte-identical. The benchmark figures below were measured on the same card.
 
 ## Overview
 
@@ -53,7 +67,7 @@ This is an enhanced Python implementation of `cgmlst-dists` originally developed
 
 Key features in this version (0.1.6):
 
-- **GPU Acceleration**: Optional CUDA GPU support for dramatically faster calculations (up to 123x speedup)
+- **GPU Acceleration**: Optional CUDA support for the distance kernel (up to 123x speedup); requires an NVIDIA driver and CUDA toolkit, see [GPU support](#gpu-support)
 - **Vectorized CPU Computation**: NumPy-based vectorized distance calculation with multi-threaded parallelism
 - **Optimized Memory Management**: Batch processing to handle large datasets efficiently
 - **Multithreaded Processing**: Parallelized calculations across CPU cores (numpy releases the GIL)
@@ -138,6 +152,9 @@ python cgmlst-dists.py -i input.tsv -c -m lower-tri -t 8 > distances.tsv
 ```bash
 python cgmlst-dists.py --input input.tsv --output output.tsv --gpu
 ```
+
+Without a usable CUDA device this falls back to the CPU with a warning on
+stderr; see [GPU support](#gpu-support) for what each install route provides.
 
 ### Missing Data
 
@@ -323,25 +340,21 @@ on disk in the directory given by the `NUMBA_CACHE_DIR` environment variable.
     --input data/input.tab --output data/output.tab
   ```
 
-### GPU support
+### GPU support in Docker
 
-> **The published Docker image runs on CPU only.** It is based on
-> `python:3.13-slim`, which does not ship the CUDA runtime that numba needs, so
-> even with `--gpus all` the tool reports `GPU available: No` and falls back to
-> the (fast) multi-threaded CPU kernel. GPU acceleration is available when
-> running **from source / conda** on a host with a CUDA-capable NVIDIA GPU and
-> the CUDA Toolkit installed. Running a GPU-enabled container would require an
-> image built on a CUDA base (e.g. `nvidia/cuda:*-runtime`), which is not
-> currently provided.
+The published image is **CPU-only**, and `--gpus all` is not enough to change
+that. The NVIDIA container runtime exposes the device and the driver, so numba
+can see the card, but it cannot compile its kernels: `libnvvm.so`, the NVVM
+compiler from the CUDA toolkit, is not in the image, and the kernels are
+compiled at runtime inside the container. The failure is explicit:
 
-Note: in `docker run`, `--gpus all` is a **Docker** flag (it exposes host GPUs
-to the container) while `--gpu` is the **tool** flag (it asks the program to use
-a GPU). They are different flags and both would be needed for GPU runs:
-
-```bash
-# Requires a CUDA-based image AND the NVIDIA Container Toolkit on the host.
-docker run --rm --gpus all -v "$(pwd):/app/data" ghcr.io/genpat-it/cgmlst-dists-py --input data/input.tab --output data/output.tab --gpu
 ```
+NvvmSupportError: libNVVM cannot be found
+```
+
+The tool detects this, warns on stderr and computes on the CPU, so results are
+still correct. For GPU runs use the conda or from-source install described in
+[GPU support](#gpu-support).
 
 ## Advantages Over Original Implementation
 

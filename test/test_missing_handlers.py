@@ -5,6 +5,7 @@ Run with:  pytest test/test_missing_handlers.py -v
 """
 
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -440,3 +441,17 @@ def test_locus_filter_output_matches_across_loaders(tmp_path):
     # The filters must actually remove something, or the test proves nothing.
     unfiltered = run_cli("-i", src, "-c", "-s")
     assert len(filtered.splitlines()) < len(unfiltered.splitlines())
+
+
+def test_gpu_request_without_cuda_warns(monkeypatch, tmp_path):
+    """Falling back to the CPU is fine; doing it silently is not."""
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), "-i", str(REPO / "test" / "boring.tab"),
+         "-c", "-s", "-g"],
+        capture_output=True, text=True,
+        env={**os.environ, "CUDA_VISIBLE_DEVICES": "-1", "NUMBA_DISABLE_CUDA": "1"},
+    )
+    assert proc.returncode == 0
+    assert "WARNING" in proc.stderr and "--gpu" in proc.stderr
+    # The matrix must still be correct.
+    assert proc.stdout == (REPO / "validation" / "boring_c.tab").read_text()

@@ -1019,6 +1019,16 @@ def main():
         use_gpu = False
         if args.gpu:
             use_gpu = check_gpu_availability(args.silent)
+            if not use_gpu:
+                # Falling back silently means a user who believes they are on the
+                # GPU has no way to tell. Warn on stderr even under --silent, and
+                # say what is actually missing: CUDA needs a driver and toolkit in
+                # the environment, which the CPU-only Docker image does not carry.
+                sys.stderr.write(
+                    "WARNING: --gpu requested but no usable CUDA device was found; "
+                    "computing on the CPU instead. GPU use needs an NVIDIA driver on "
+                    "the host (the published Docker image is CPU-only).\n"
+                )
         
         # Print system capabilities if not silent
         if not args.silent:
