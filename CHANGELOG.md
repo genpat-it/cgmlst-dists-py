@@ -21,6 +21,14 @@
   N x N matrix, so the feasibility check from 0.1.5 is as binding as before.
 
 ### Changed
+- **numba is no longer a required dependency.** It is only needed for `--gpu`, and
+  with llvmlite it is ~199 MB, the heaviest dependency in the package and the one
+  that gates which Python versions can be supported. It moved to
+  `requirements-gpu.txt`; the CPU path computes with numpy and never imports it.
+  Without numba, `--gpu` warns and computes on the CPU with identical results,
+  rather than crashing at import as it did before the lazy import. The CPU Docker
+  image drops from 877 MB to 592 MB as a result. CI gained a matrix dimension so
+  the numba-dependent tests keep running on the legs that install it.
 - numba is now imported lazily, and CUDA is only probed when `--gpu` is passed.
   Startup drops from 458 ms to 284 ms. The default CPU path computes with numpy
   and never needed numba, and the tool now runs correctly with numba absent

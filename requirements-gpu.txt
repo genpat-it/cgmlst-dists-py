@@ -1,0 +1,5 @@
+# Extra dependency for --gpu only. numba compiles the CUDA kernels, and with
+# llvmlite it is ~199 MB, so it is kept out of requirements.txt: the default
+# CPU path computes with numpy and never imports it. Also needs an NVIDIA
+# driver on the host; see the GPU support section of the README.
+numba

@@ -28,13 +28,21 @@ jobs:
           # pyarrow is an optional accelerator that replaces the whole loading
           # path, so both configurations must produce identical output. The
           # Docker image ships with it, plain pip/conda installs do not.
+          # numba is optional (needed only for --gpu), so it gets its own leg:
+          # without it 18 tests skip, and that must not be the only thing CI runs.
           - python: "3.13"
             pyarrow: true
+            numba: true
           - python: "3.13"
             pyarrow: false
+            numba: true
+          - python: "3.13"
+            pyarrow: true
+            numba: false
           - python: "3.11"
             pyarrow: false
-    name: py${{ matrix.python }}${{ matrix.pyarrow && ' + pyarrow' || '' }}
+            numba: false
+    name: py${{ matrix.python }}${{ matrix.pyarrow && ' + pyarrow' || '' }}${{ matrix.numba && ' + numba' || '' }}
     steps:
       # Git LFS is deliberately not fetched by default. The crc32 dataset and its
       # reference matrices total ~333 MiB, which every job of this matrix would
@@ -59,6 +67,10 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt pytest
+
+      - name: Install numba
+        if: matrix.numba
+        run: pip install -r requirements-gpu.txt
 
       # pyarrow ships in requirements.txt, but the pandas fallback is still a
       # supported configuration (the loader probes for pyarrow at runtime), so

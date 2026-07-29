@@ -42,18 +42,29 @@ more slowly.
 
 ```bash
 # minimal install, without the Arrow loader
-pip install numpy pandas numba tqdm psutil
+pip install numpy pandas tqdm psutil
+```
+
+**GPU users only:** `numba` is not in `requirements.txt`, because the CPU path
+computes with numpy and never imports it, while numba plus llvmlite weigh ~199 MB
+and constrain which Python versions are supported. Install it when you want
+`--gpu`:
+
+```bash
+pip install -r requirements-gpu.txt
 ```
 
 ### GPU support
 
-GPU acceleration needs an NVIDIA driver on the host. The CUDA components
-themselves come with numba, so no separate toolkit install is required.
+GPU acceleration needs `numba` (see above, it is not installed by default) and an
+NVIDIA driver on the host. The CUDA components themselves come with numba, so no
+separate toolkit install is required. Without numba, or without a usable device,
+`--gpu` warns on stderr and computes on the CPU with identical results.
 
 | Install route | `--gpu` |
 |---|---|
 | Bioconda | supported — needs only an NVIDIA driver on the host |
-| From source | supported — needs only an NVIDIA driver on the host |
+| From source | supported — install `requirements-gpu.txt`, plus an NVIDIA driver |
 | Docker, published image | **not supported**: CPU-only, see [GPU support in Docker](#gpu-support-in-docker) |
 | Docker, `Dockerfile.gpu` | supported — build it yourself, it is not published |
 
