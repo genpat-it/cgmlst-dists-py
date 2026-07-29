@@ -41,6 +41,29 @@ ALL_HANDLERS = [
     cd.HANDLER_ABSOLUTE,
 ]
 
+# --------------------------------------------------------------------------
+# GPU path (skipped when no CUDA device is present)
+# --------------------------------------------------------------------------
+
+def has_cuda():
+    try:
+        from numba import cuda
+        return cuda.is_available()
+    except Exception:
+        return False
+
+
+requires_cuda = pytest.mark.skipif(not has_cuda(), reason="no CUDA device available")
+
+
+def has_numba():
+    return importlib.util.find_spec("numba") is not None
+
+
+# numba is only needed for --gpu and for the oracle kernel, so it may legitimately
+# be absent; those tests skip rather than fail.
+requires_numba = pytest.mark.skipif(not has_numba(), reason="numba not installed")
+
 
 def run_cli(*args):
     """Run the tool and return its stdout matrix as text."""
@@ -140,6 +163,7 @@ def test_worked_example(tmp_path, handler, expected):
 # All three CPU implementations must agree, for every handler
 # --------------------------------------------------------------------------
 
+@requires_numba
 @pytest.mark.parametrize("handler", ALL_HANDLERS)
 def test_numpy_numba_and_block_fallback_agree(handler):
     v = profiles(40, 60, 0.15, seed=7)
@@ -280,19 +304,6 @@ def test_invalid_handler_is_rejected():
     assert "invalid choice" in proc.stderr
 
 
-# --------------------------------------------------------------------------
-# GPU path (skipped when no CUDA device is present)
-# --------------------------------------------------------------------------
-
-def has_cuda():
-    try:
-        from numba import cuda
-        return cuda.is_available()
-    except Exception:
-        return False
-
-
-requires_cuda = pytest.mark.skipif(not has_cuda(), reason="no CUDA device available")
 
 
 @requires_cuda
@@ -334,7 +345,7 @@ def test_gpu_batch_falls_back_to_cpu_on_failure(handler, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("simulated CUDA failure")
 
-    monkeypatch.setattr(cd.calculate_hamming_distances_cuda_kernel, "__getitem__", boom)
+    monkeypatch.setattr(cd, "calculate_hamming_distances_cuda_kernel", boom)
     got = cd.calculate_hamming_distances_cuda_batch(v, 0, v.shape[0], 0, v.shape[0], True, handler)
     assert np.array_equal(symmetrize(got), numpy_dist(v, handler))
 
@@ -455,3 +466,68 @@ def test_gpu_request_without_cuda_warns(monkeypatch, tmp_path):
     assert "WARNING" in proc.stderr and "--gpu" in proc.stderr
     # The matrix must still be correct.
     assert proc.stdout == (REPO / "validation" / "boring_c.tab").read_text()
+
+
+# --------------------------------------------------------------------------
+# Profile deduplication (--dedup)
+# --------------------------------------------------------------------------
+
+def clonal_input(path, n_samples, n_loci, n_unique, missing_rate, seed):
+    """Write a TSV where only n_unique distinct profiles occur."""
+    rng = np.random.default_rng(seed)
+    base = rng.integers(1, 40, size=(n_unique, n_loci)).astype(np.int32)
+    if missing_rate:
+        base[rng.random(base.shape) < missing_rate] = 0
+    idx = np.concatenate([np.arange(n_unique),
+                          rng.integers(0, n_unique, size=n_samples - n_unique)])
+    v = base[idx]
+    lines = ["id\t" + "\t".join(f"L{i}" for i in range(n_loci))]
+    for i, row in enumerate(v):
+        lines.append(f"S{i}\t" + "\t".join("-" if x == 0 else str(x) for x in row))
+    path.write_text("\n".join(lines) + "\n")
+    return v
+
+
+@pytest.mark.parametrize("handler", [1, 2, 3])
+@pytest.mark.parametrize("missing_rate", [0.0, 0.2])
+def test_dedup_output_is_exact(tmp_path, handler, missing_rate):
+    """Deduplication is an optimization: the matrix must be byte-identical."""
+    src = tmp_path / "clonal.tab"
+    clonal_input(src, 60, 40, 15, missing_rate, seed=31 + handler)
+    plain = run_cli("-i", src, "-c", "-s", "-y", handler)
+    deduped = run_cli("-i", src, "-c", "-s", "-y", handler, "-u")
+    assert plain == deduped
+
+
+def test_dedup_is_exact_with_no_duplicates(tmp_path):
+    """The all-unique case must fall through without changing the result."""
+    src = tmp_path / "unique.tab"
+    clonal_input(src, 40, 30, 40, 0.15, seed=7)
+    assert run_cli("-i", src, "-c", "-s") == run_cli("-i", src, "-c", "-s", "-u")
+
+
+def test_dedup_refuses_pair_delete(tmp_path):
+    """-y 0 is not exact under deduplication, so the combination is rejected
+    rather than silently producing different numbers."""
+    src = tmp_path / "clonal.tab"
+    clonal_input(src, 20, 20, 5, 0.2, seed=3)
+    proc = run_raw("-i", src, "-c", "-s", "-y", 0, "-u")
+    assert proc.returncode == 2
+    assert "--dedup" in proc.stderr and "-y 0" in proc.stderr
+    assert proc.stdout == ""
+
+
+def test_dedup_reports_how_many_profiles_collapsed(tmp_path):
+    src = tmp_path / "clonal.tab"
+    clonal_input(src, 50, 25, 10, 0.0, seed=11)
+    proc = run_raw("-i", src, "-c", "-u")
+    assert proc.returncode == 0
+    assert "50" in proc.stderr and "10 unique" in proc.stderr
+
+
+def test_dedup_preserves_sample_order(tmp_path):
+    """Rows must stay in input order, not in the order of unique profiles."""
+    src = tmp_path / "clonal.tab"
+    clonal_input(src, 30, 20, 6, 0.1, seed=5)
+    rows = [l.split("\t")[0] for l in run_cli("-i", src, "-c", "-s", "-u").strip().splitlines()]
+    assert rows[1:] == [f"S{i}" for i in range(30)]

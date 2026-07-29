@@ -13,7 +13,6 @@ import pandas as pd
 import numpy as np
 import time
 import math
-from numba import jit, prange, set_num_threads, cuda
 from tqdm import tqdm
 import mmap
 from concurrent.futures import ThreadPoolExecutor
@@ -23,6 +22,93 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 VERSION = "0.1.7"
+
+# numba is imported lazily. Importing it costs ~0.15s of startup on every run,
+# but the default CPU path computes with numpy and never needs it: only --gpu
+# (CUDA kernels, device queries, thread count) and the numba fallback kernel do.
+# The public function names below are unchanged; each one materializes its
+# kernel on first call and caches it.
+_NUMBA_KERNELS = {}
+
+def _numba_kernels():
+    """Import numba and JIT-compile the kernels, once per process."""
+    if not _NUMBA_KERNELS:
+        from numba import jit, prange, cuda
+
+        @jit(nopython=True, parallel=True, cache=True)
+        def hamming_numba(values, as_allele, rescale):
+            n_samples = values.shape[0]
+            n_loci = values.shape[1]
+            distances = np.zeros((n_samples, n_samples), dtype=np.int32)
+
+            for i in prange(n_samples):
+                for j in range(i + 1, n_samples):
+                    dist = 0
+                    comparable = 0
+                    for k in range(n_loci):
+                        vi = values[i, k]
+                        vj = values[j, k]
+                        if as_allele:
+                            if vi != vj:
+                                dist += 1
+                        elif vi != 0 and vj != 0:
+                            comparable += 1
+                            if vi != vj:
+                                dist += 1
+
+                    if rescale:
+                        scaled = (dist + 0.01) * n_loci / (comparable + 0.01)
+                        distances[i, j] = int(np.rint(scaled))
+                    else:
+                        distances[i, j] = dist
+
+            return distances
+
+        @cuda.jit
+        def cuda_kernel(values, distances, counts, start_i, start_j, as_allele, rescale):
+            i, j = cuda.grid(2)
+            dist_i_size = distances.shape[0]
+            dist_j_size = distances.shape[1]
+
+            if i < dist_i_size and j < dist_j_size:
+                real_i = start_i + i
+                real_j = start_j + j
+
+                if real_i < real_j:
+                    dist = 0
+                    comparable = 0
+                    n_loci = values.shape[1]
+
+                    for k in range(n_loci):
+                        vi = values[real_i, k]
+                        vj = values[real_j, k]
+                        if as_allele:
+                            if vi != vj:
+                                dist += 1
+                        elif vi != 0 and vj != 0:
+                            comparable += 1
+                            if vi != vj:
+                                dist += 1
+
+                    distances[i, j] = dist
+                    if rescale:
+                        counts[i, j] = comparable
+
+        _NUMBA_KERNELS['hamming'] = hamming_numba
+        _NUMBA_KERNELS['cuda'] = cuda_kernel
+    return _NUMBA_KERNELS
+
+def _cuda():
+    """Return numba.cuda, imported on demand."""
+    from numba import cuda
+    return cuda
+
+def _cuda_is_available():
+    """Probe for a usable CUDA device without importing numba unless asked."""
+    try:
+        return _cuda().is_available()
+    except Exception:
+        return False
 
 # Missing-data handlers, numbered as in GrapeTree's `--missing/-y` flag so the
 # two tools can be compared. All four operate on the same pairwise Hamming
@@ -55,6 +141,25 @@ HANDLER_NAMES = {
     HANDLER_AS_ALLELE: "as_allele",
     HANDLER_ABSOLUTE: "absolute_distance",
 }
+
+def deduplicate_profiles(values):
+    """Find identical allelic profiles.
+
+    Returns (labels, representatives): `labels[i]` is the index into
+    `representatives` of the profile of sample i, so the full matrix is recovered
+    with `dist[np.ix_(labels, labels)]`.
+
+    Rows are compared as opaque records so numpy does the work in C. That view
+    needs a C-contiguous array of a single dtype; np.unique(axis=0) is the
+    fallback when it cannot be taken (it is slower because it sorts whole rows).
+    """
+    v = np.ascontiguousarray(values)
+    try:
+        view = v.view([('', v.dtype)] * v.shape[1]).ravel()
+        _, reps, labels = np.unique(view, return_index=True, return_inverse=True)
+    except (ValueError, TypeError):
+        _, reps, labels = np.unique(v, axis=0, return_index=True, return_inverse=True)
+    return np.ravel(labels), reps
 
 def rescale_pair_delete(diff, comparable, n_loci):
     """GrapeTree's `pair_delete` rescaling: project the observed differences from
@@ -445,82 +550,28 @@ def calculate_hamming_distances_numpy(values, num_threads=None, silent=False,
 
     return distances
 
-@jit(nopython=True, parallel=True, cache=True)
 def calculate_hamming_distances_numba(values, as_allele=False, rescale=False):
     """Calculate Hamming distances between all pairs of samples (fallback).
 
-    `fastmath` is deliberately not enabled: the `pair_delete` rescaling is a
-    division whose result gets rounded, so relaxed floating-point semantics
-    could flip a tie and change the reported distance."""
-    n_samples = values.shape[0]
-    n_loci = values.shape[1]
-    distances = np.zeros((n_samples, n_samples), dtype=np.int32)
+    Thin wrapper: the compiled kernel is built on first call so that importing
+    this module does not pull in numba. `fastmath` is deliberately not enabled on
+    it, because the `pair_delete` rescaling is a division whose result gets
+    rounded, and relaxed floating-point semantics could flip a tie."""
+    return _numba_kernels()['hamming'](values, as_allele, rescale)
 
-    for i in prange(n_samples):
-        for j in range(i + 1, n_samples):
-            dist = 0
-            comparable = 0
-            for k in range(n_loci):
-                vi = values[i, k]
-                vj = values[j, k]
-                if as_allele:
-                    if vi != vj:
-                        dist += 1
-                elif vi != 0 and vj != 0:
-                    comparable += 1
-                    if vi != vj:
-                        dist += 1
-
-            if rescale:
-                scaled = (dist + 0.01) * n_loci / (comparable + 0.01)
-                distances[i, j] = int(np.rint(scaled))
-            else:
-                distances[i, j] = dist
-
-    return distances
-
-@cuda.jit
-def calculate_hamming_distances_cuda_kernel(values, distances, counts, start_i, start_j,
-                                            as_allele, rescale):
-    """CUDA kernel function for calculating Hamming distances.
+def calculate_hamming_distances_cuda_kernel():
+    """Return the compiled CUDA kernel, building it on first use.
 
     For `pair_delete` the kernel only reports the raw difference count and the
     number of comparable loci; the rescaling itself is done on the host, so the
     GPU and CPU paths round identically instead of relying on device float
     semantics matching numpy's."""
-    i, j = cuda.grid(2)
-
-    dist_i_size = distances.shape[0]
-    dist_j_size = distances.shape[1]
-
-    if i < dist_i_size and j < dist_j_size:
-        real_i = start_i + i
-        real_j = start_j + j
-
-        if real_i < real_j:
-            dist = 0
-            comparable = 0
-            n_loci = values.shape[1]
-
-            for k in range(n_loci):
-                vi = values[real_i, k]
-                vj = values[real_j, k]
-                if as_allele:
-                    if vi != vj:
-                        dist += 1
-                elif vi != 0 and vj != 0:
-                    comparable += 1
-                    if vi != vj:
-                        dist += 1
-
-            distances[i, j] = dist
-            if rescale:
-                counts[i, j] = comparable
+    return _numba_kernels()['cuda']
 
 def estimate_gpu_batch_size(n_samples, n_loci, silent=False):
     """Estimate optimal batch size based on available GPU memory."""
     try:
-        mem_info = cuda.current_context().get_memory_info()
+        mem_info = _cuda().current_context().get_memory_info()
         free_mem = mem_info[0]
     except Exception:
         free_mem = 2 * 1024**3  # Default 2GB
@@ -574,6 +625,7 @@ def calculate_hamming_distances_cuda_batch(values, start_i, end_i, start_j, end_
         batch_j_size = end_j - start_j
 
         # Transfer data to GPU
+        cuda = _cuda()
         values_device = cuda.to_device(values)
         distances_device = cuda.device_array((batch_i_size, batch_j_size), dtype=np.int32)
         # Zero-initialize
@@ -592,7 +644,7 @@ def calculate_hamming_distances_cuda_batch(values, start_i, end_i, start_j, end_
         blocks_per_grid_y = (batch_j_size + threads_per_block[1] - 1) // threads_per_block[1]
         blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
 
-        calculate_hamming_distances_cuda_kernel[blocks_per_grid, threads_per_block](
+        calculate_hamming_distances_cuda_kernel()[blocks_per_grid, threads_per_block](
             values_device, distances_device, counts_device, start_i, start_j,
             as_allele, rescale
         )
@@ -822,6 +874,7 @@ def write_to_stdout(distances, index, output_sep="\t", index_name="cgmlst-dists"
 def check_gpu_availability(silent=False):
     """Check if CUDA GPU is available."""
     try:
+        cuda = _cuda()
         cuda_available = cuda.is_available()
         if cuda_available and not silent:
             # Get device information
@@ -841,7 +894,7 @@ def check_gpu_availability(silent=False):
     except Exception:
         return False
 
-def detect_system_capabilities(silent=False):
+def detect_system_capabilities(silent=False, probe_gpu=False):
     """Detect system capabilities and return recommended settings."""
     # Detect number of available CPU cores
     cpu_count = os.cpu_count() or 1
@@ -850,7 +903,10 @@ def detect_system_capabilities(silent=False):
     recommended_threads = cpu_count
     
     # Check if GPU is available
-    gpu_available = cuda.is_available()
+    # Probing for CUDA imports numba (~0.1s). Skip it unless --gpu was asked
+    # for: the default CPU path never needs numba, and reporting "GPU: No" is
+    # not worth paying that on every run.
+    gpu_available = _cuda_is_available() if probe_gpu else None
     
     # Estimate available memory (this is approximate)
     try:
@@ -935,7 +991,9 @@ def print_performance_summary(load_time, calc_time, save_time, total_time):
 def main():
     try:
         # Detect system capabilities for default settings
-        capabilities = detect_system_capabilities()
+        # argv is inspected directly because the capability defaults feed the
+        # argument parser itself, so they must be computed before parsing.
+        capabilities = detect_system_capabilities(probe_gpu=('-g' in sys.argv or '--gpu' in sys.argv))
         default_threads = capabilities['recommended_threads']
         default_memory_gb = round(capabilities['recommended_memory_gb'])
         default_io_threads = capabilities['io_threads']
@@ -956,6 +1014,10 @@ def main():
         parser.add_argument("-M", "--max_memory_gb", type=float, default=default_memory_gb, help=f"Maximum memory to use in GB for distance calculation (default: {default_memory_gb})")
         parser.add_argument("-k", "--chunk_size", type=int, default=1000, help="Size of chunks for reading/writing files")
         parser.add_argument("-n", "--missing_char", default="-", help="Character used for missing data (default: '-')")
+        parser.add_argument("-u", "--dedup", action="store_true",
+                          help="Collapse identical profiles, compute distances over the unique ones "
+                               "and expand the result. Exact, and much faster on clonal data; costs "
+                               "a few percent when there are no duplicates. Not compatible with -y 0")
         parser.add_argument("-y", "--missing-handler", type=int, choices=[0, 1, 2, 3], default=HANDLER_ABSOLUTE,
                           help="How to treat missing calls, numbered as in GrapeTree's -y flag. "
                                "0: pair_delete (ignore per pair, then rescale by n_loci/n_comparable); "
@@ -993,11 +1055,21 @@ def main():
         if args.stdout:
             sys.stdout = sys.stderr
 
-        # Set number of threads for Numba
         num_threads = args.num_threads
         if not args.silent:
             print(f"Using {num_threads} threads for parallel processing")
-        set_num_threads(num_threads)
+        # Only numba's kernels honour this setting, and importing numba to apply
+        # it would undo the lazy import for every CPU run; the numpy path takes
+        # its thread count directly from num_threads.
+        if args.gpu:
+            # numba may not be installed at all: --gpu then degrades to the CPU
+            # path with a warning (see check_gpu_availability), so a missing
+            # import here must not abort the run.
+            try:
+                from numba import set_num_threads
+                set_num_threads(num_threads)
+            except ImportError:
+                pass
         
         # Start total timing
         total_start_time = time.time()
@@ -1013,8 +1085,8 @@ def main():
                 # the environment, which the CPU-only Docker image does not carry.
                 sys.stderr.write(
                     "WARNING: --gpu requested but no usable CUDA device was found; "
-                    "computing on the CPU instead. GPU use needs an NVIDIA driver on "
-                    "the host (the published Docker image is CPU-only).\n"
+                    "computing on the CPU instead. GPU use needs numba and an NVIDIA "
+                    "driver on the host (the published Docker image is CPU-only).\n"
                 )
         
         # Print system capabilities if not silent
@@ -1023,7 +1095,8 @@ def main():
             io_capabilities = detect_io_capabilities(args.silent)
             print(f"\nSystem capabilities detected:")
             print(f"- CPU cores: {capabilities['cpu_count']}")
-            print(f"- GPU available: {'Yes' if capabilities['gpu_available'] else 'No'}")
+            gpu_state = {True: 'Yes', False: 'No', None: 'not probed (pass --gpu to use it)'}
+            print(f"- GPU available: {gpu_state[capabilities['gpu_available']]}")
             print(f"- Available memory: ~{capabilities['available_memory_gb']:.1f} GB")
             print(f"- Disk read speed: ~{io_capabilities['read_speed_mb_per_sec']:.1f} MB/s")
             print(f"- Disk write speed: ~{io_capabilities['write_speed_mb_per_sec']:.1f} MB/s")
@@ -1045,6 +1118,17 @@ def main():
             sys.exit(1)
 
         handler = args.missing_handler
+        if args.dedup and handler == HANDLER_PAIR_DELETE:
+            # Under pair_delete two identical profiles are not necessarily at
+            # distance 0: round(0.01 * n_loci / (comparable + 0.01)) exceeds 0 when
+            # very few loci are called. Deduplication puts such pairs on the
+            # diagonal and reports 0, so the result would silently differ.
+            sys.stderr.write(
+                "ERROR: --dedup cannot be combined with -y 0 (pair_delete): under that "
+                "handler two identical profiles may be at non-zero distance, so collapsing "
+                "them would change the result. Drop --dedup, or use -y 3.\n"
+            )
+            sys.exit(2)
         if not args.silent and handler != HANDLER_ABSOLUTE:
             print(f"\nMissing-data handler: {handler} ({HANDLER_NAMES[handler]})")
 
@@ -1092,8 +1176,28 @@ def main():
         
         # Calculate distances and measure time
         calc_start_time = time.time()
-        distances = calculate_distances_batched(data, use_gpu, args.max_memory_gb, args.silent,
-                                               num_threads=num_threads, handler=handler)
+        if not args.dedup:
+            distances = calculate_distances_batched(data, use_gpu, args.max_memory_gb, args.silent,
+                                                   num_threads=num_threads, handler=handler)
+        else:
+            # Distances depend only on the pair of profiles, so identical profiles
+            # can be collapsed: compute the DxD matrix over unique profiles and
+            # expand it back. Exact for handlers 1, 2 and 3.
+            values = data.to_numpy()
+            labels, reps = deduplicate_profiles(values)
+            n_unique = len(reps)
+            if not args.silent:
+                print(f"Deduplication: {n_samples:,} samples -> {n_unique:,} unique profiles")
+            if n_unique == n_samples:
+                distances = calculate_distances_batched(data, use_gpu, args.max_memory_gb, args.silent,
+                                                       num_threads=num_threads, handler=handler)
+            else:
+                unique = calculate_distances_batched(
+                    pd.DataFrame(values[reps]), use_gpu, args.max_memory_gb, args.silent,
+                    num_threads=num_threads, handler=handler)
+                # Expansion still materializes the full NxN matrix, so this saves
+                # computation, not memory; the feasibility check above still applies.
+                distances = unique[np.ix_(labels, labels)] if unique is not None else None
         calc_end_time = time.time()
         calc_time = calc_end_time - calc_start_time
         

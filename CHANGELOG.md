@@ -2,7 +2,31 @@
 
 ## [Unreleased] - 0.1.7
 
+### Added
+- `-u/--dedup`: collapse identical profiles, compute the matrix over the unique
+  ones and expand it back. Exact, not approximate. On clonal data — common in
+  surveillance — 2000 samples with 200 distinct profiles compute 4.5x faster and
+  4000 with 400 distinct 5x; with no duplicates it costs about 8%. Detection is
+  done in numpy (rows compared as opaque records) rather than with a compiled
+  numba kernel, which is what makes the no-duplicate case cheap: 13-51 ms instead
+  of ~500 ms of fixed overhead.
+
+  It refuses to run with `-y 0` (`pair_delete`) instead of silently changing the
+  result: under that handler two identical profiles can be at non-zero distance,
+  because `round(0.01 * n_loci / (comparable + 0.01))` exceeds 0 when very few
+  loci are called, and collapsing them onto the diagonal would report 0. Measured
+  boundary: duplicates of profiles with <= 2% of loci called.
+
+  It saves computation, not memory: the expansion still materializes the full
+  N x N matrix, so the feasibility check from 0.1.5 is as binding as before.
+
 ### Changed
+- numba is now imported lazily, and CUDA is only probed when `--gpu` is passed.
+  Startup drops from 458 ms to 284 ms. The default CPU path computes with numpy
+  and never needed numba, and the tool now runs correctly with numba absent
+  altogether (`--gpu` then warns and computes on the CPU); previously it crashed
+  at import. The four tests using the numba kernel as an oracle skip when it is
+  missing, as the GPU tests already did.
 - `pyarrow` is now part of `requirements.txt`, and of the Bioconda run
   dependencies, instead of being an opt-in extra. It is still probed at runtime
   and the pandas fallback is unchanged, so an environment without it behaves
