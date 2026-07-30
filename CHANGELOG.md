@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - 0.1.7
+## [0.1.7] - 2026-07-30
 
 ### Added
 - `-u/--dedup`: collapse identical profiles, compute the matrix over the unique
