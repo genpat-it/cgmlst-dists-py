@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cgmlst-dists-py</title>
+<meta name="description" content="Pairwise cgMLST Hamming distance matrix from chewBBACA allele calls, in Python, with GrapeTree-compatible missing-data handlers and optional GPU.">
+<style>
+:root{
+  --bg:#fbfaf7; --fg:#1d1f22; --muted:#5d636b; --line:#e3e0d8; --card:#ffffff;
+  --accent:#b4531f; --accent-soft:#f6e7dc; --code:#f2efe8; --good:#2f7a45;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#15171a; --fg:#e8e6e1; --muted:#a2a7ae; --line:#2c3036; --card:#1c1f23;
+    --accent:#e88a52; --accent-soft:#33241b; --code:#22262b; --good:#6cc08a; color-scheme: dark; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:0 20px}
+header{border-bottom:1px solid var(--line);padding-block:56px 40px}
+h1{font-size:2.4rem;line-height:1.15;margin:0 0 12px;letter-spacing:-.02em}
+h1 span{color:var(--accent)}
+.lede{font-size:1.15rem;color:var(--muted);margin:0 0 24px;max-width:640px}
+.links{display:flex;flex-wrap:wrap;gap:10px}
+.links a{display:inline-block;padding:8px 14px;border:1px solid var(--line);border-radius:8px;
+  color:var(--fg);text-decoration:none;background:var(--card);font-size:.95rem}
+.links a.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+section{padding-block:36px;border-bottom:1px solid var(--line)}
+h2{font-size:1.4rem;margin:0 0 16px;letter-spacing:-.01em}
+h3{font-size:1.05rem;margin:22px 0 8px}
+p{margin:0 0 12px}
+a{color:var(--accent)}
+code{font:.9em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code);
+  padding:1px 5px;border-radius:4px}
+pre{background:var(--code);border-radius:8px;padding:14px 16px;overflow-x:auto;margin:0 0 14px}
+pre code{background:none;padding:0;font-size:.88rem;line-height:1.5}
+.tbl{overflow-x:auto;margin:0 0 12px}
+table{border-collapse:collapse;width:100%;font-size:.95rem}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--muted);font-weight:600}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+td.win{color:var(--good);font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+.card h3{margin-top:0}
+.note{background:var(--accent-soft);border-radius:10px;padding:14px 16px;margin:0 0 14px}
+.small{font-size:.88rem;color:var(--muted)}
+footer{padding-block:28px 48px;color:var(--muted);font-size:.9rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>cgmlst-dists<span>-py</span></h1>
+  <p class="lede">Pairwise cgMLST Hamming distance matrix from chewBBACA allele-call tables, in
+  Python. Byte-identical to the original <code>cgmlst-dists</code> by default, with
+  GrapeTree-compatible missing-data handlers, exact deduplication and optional GPU.</p>
+  <div class="links">
+    <a class="primary" href="https://github.com/genpat-it/cgmlst-dists-py">GitHub</a>
+    <a href="https://bioconda.github.io/recipes/cgmlst-dists-py/README.html">Bioconda</a>
+    <a href="https://github.com/genpat-it/cgmlst-dists-py/pkgs/container/cgmlst-dists-py">Docker (ghcr.io)</a>
+    <a href="https://genpat-it.github.io/cgmlst-dists-rs/">cgmlst-dists-rs</a>
+  </div>
+</header>
+
+<section id="install">
+  <h2>Install</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Bioconda</h3>
+      <pre><code>conda install -c bioconda \
+  cgmlst-dists-py</code></pre>
+      <p class="small">Recommended. <code>--gpu</code> works with an NVIDIA driver on the host.</p>
+    </div>
+    <div class="card">
+      <h3>Docker</h3>
+      <pre><code>docker pull ghcr.io/genpat-it/cgmlst-dists-py</code></pre>
+      <p class="small">CPU-only image; <code>Dockerfile.gpu</code> builds a GPU one.</p>
+    </div>
+    <div class="card">
+      <h3>From source</h3>
+      <pre><code>git clone https://github.com/genpat-it/cgmlst-dists-py
+cd cgmlst-dists-py
+pip install -r requirements.txt</code></pre>
+      <p class="small"><code>pip install -r requirements-gpu.txt</code> for <code>--gpu</code>.</p>
+    </div>
+  </div>
+</section>
+
+<section id="usage">
+  <h2>Usage</h2>
+<pre><code>cgmlst-dists.py -i chewbbaca.tab -o distances.tsv
+cgmlst-dists.py -i chewbbaca.tab -o distances.tsv -y 0     # GrapeTree pair_delete
+cgmlst-dists.py -i chewbbaca.tab -o distances.tsv --dedup  # clonal data, exact
+cgmlst-dists.py -i chewbbaca.tab --stdout -m lower-tri</code></pre>
+  <p>Distance = number of loci where the two alleles differ and <strong>both are present</strong>
+  (default <code>-y 3</code>, the original <code>cgmlst-dists</code> semantics). A leading
+  <code>INF-</code> is stripped; chewBBACA classes (<code>LNF</code>, <code>PLOT3</code>,
+  <code>ASM</code>, …), <code>-</code> and empty cells are missing.</p>
+  <h3>Missing-data handlers</h3>
+  <div class="tbl"><table>
+    <thead><tr><th><code>-y</code></th><th>name</th><th>behaviour</th></tr></thead>
+    <tbody>
+      <tr><td>0</td><td>pair_delete</td><td>ignore missing per pair, rescale to all loci (GrapeTree default)</td></tr>
+      <tr><td>1</td><td>complete_delete</td><td>drop loci not called in every sample</td></tr>
+      <tr><td>2</td><td>as_allele</td><td>missing is an allele: missing vs called is a difference</td></tr>
+      <tr><td>3</td><td>absolute_distance</td><td>ignore missing per pair, absolute count — <strong>default</strong></td></tr>
+    </tbody>
+  </table></div>
+  <p>Full option list in the <a href="https://github.com/genpat-it/cgmlst-dists-py#usage">README</a>.</p>
+</section>
+
+<section id="hashed">
+  <h2>chewBBACA hashed profiles</h2>
+  <p>Hashed profiles store CRC32 hashes as allele ids, up to 4&nbsp;294&nbsp;967&nbsp;295. Alleles
+  are read as 64-bit integers. In releases ≤&nbsp;0.1.7, in a locus that also held text
+  (<code>*N</code> novel alleles, chewBBACA classes), every hash above 2<sup>31</sup> was turned
+  into the same number, so different alleles compared equal.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Listeria, Pasteur cgMLST (1748 loci), 2099 genomes</th>
+      <th class="num">≤ 0.1.7</th><th class="num">fixed</th></tr></thead>
+    <tbody>
+      <tr><td>ERR10109288 vs ERR10109289</td><td class="num">857</td><td class="num win">1196</td></tr>
+      <tr><td>ERR10109289 vs ERR10109291</td><td class="num">25</td><td class="num win">35</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">The fix is on <code>main</code> and ships in the next release. On these data the
+  output is md5-identical to tseemann <code>cgmlst-dists</code> 0.6.0 and to cgmlst-dists-rs.</p>
+</section>
+
+<section id="benchmarks">
+  <h2>Benchmarks</h2>
+  <p>20&nbsp;000 samples × 3&nbsp;000 loci, synthetic (generator below), full matrix on an
+  80-core x86-64 box. All three produce md5-identical output. Best clean run.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>implementation</th><th class="num">runtime</th></tr></thead>
+    <tbody>
+      <tr><td>tseemann <code>cgmlst-dists</code> 0.6.0 (C, <code>-j 80</code>)</td><td class="num">97 s</td></tr>
+      <tr><td><strong>cgmlst-dists-py</strong> (CPU, 80 cores)</td><td class="num">93 s</td></tr>
+      <tr><td><strong>cgmlst-dists-py</strong> <code>--dedup</code>, clonal data (2&nbsp;000 distinct profiles)</td><td class="num">64 s</td></tr>
+      <tr><td><a href="https://genpat-it.github.io/cgmlst-dists-rs/">cgmlst-dists-rs</a> (Rust, 80 cores)</td><td class="num win">5.8 s</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small">Python is on par with the multithreaded C tool; for raw speed use cgmlst-dists-rs.
+  cgmlst-dists-py adds the GrapeTree handlers, <code>--dedup</code> and GPU.</p>
+  <h3>Reproduce</h3>
+  <p>No large datasets are shipped; generate them with the script in the repository:</p>
+<pre><code>python benchmark/cgmlst-data-generator.py --samples 20000 --loci 3000 --missing 5 --output bench20k.tsv
+python benchmark/cgmlst-data-generator.py --samples 1000 --loci 1500 --hashed --output hashed.tsv
+time python cgmlst-dists.py -i bench20k.tsv -o py.tsv</code></pre>
+</section>
+
+<footer>
+  GPL-3.0-only · <a href="https://github.com/genpat-it">genpat-it</a> ·
+  Based on <a href="https://github.com/tseemann/cgmlst-dists">tseemann/cgmlst-dists</a>
+</footer>
+
+</div>
+</body>
+</html>

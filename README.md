@@ -291,7 +291,7 @@ will be flooded with the full N×N matrix.
 
 - **Fast loading (pyarrow)**: bundled by default; the Arrow-based loader reads and parses large inputs ~1.5x faster end to end than the pandas one. Auto-detected, with an identical-result fallback.
 - **Deduplication**: `--dedup` removes nearly all of the distance computation on clonal data, which is the common case in surveillance.
-- **CPU vectorization**: the numpy kernel scales with thread count; on 80 cores it is 7.6x faster than the single-threaded C implementation (see below).
+- **CPU vectorization**: the numpy kernel scales with thread count; on 80 cores it is on par with the multithreaded C implementation 0.6.0 (see below).
 - **GPU acceleration**: helps the distance kernel, but the kernel is only part of the total runtime, and the gain depends heavily on free GPU memory, since batches are sized to fit it.
 - **Memory**: the full N x N int32 matrix is held in RAM (1.5 GiB at 20,000 samples, 9.3 GiB at 50,000). The tool checks this up front and refuses to start rather than crashing halfway; `--force` overrides.
 - **I/O**: on large matrices, writing the output is a substantial share of the runtime — 38% in the benchmark below — so `--matrix-format lower-tri` or `--binary-output` are worth considering.
@@ -309,11 +309,18 @@ Test system: Intel Xeon Gold 6542Y, 80 cores, 480 GB RAM, NVIDIA L4, AlmaLinux 1
 
 #### 20,000 samples x 3,000 loci (164 MB input, 2.0 GB output matrix)
 
-| Implementation | Runtime | vs C |
-|---|---|---|
-| C `cgmlst-dists` 0.4.0 (single-threaded) | 963.8 s | 1x |
-| this tool, CPU (80 cores) | **127.0 s** | **7.6x** |
-| this tool, CPU + `--dedup`, clonal data* | **63.8 s** | **15.1x** |
+| Implementation | Runtime |
+|---|---|
+| C `cgmlst-dists` 0.4.0 (single-threaded) | 963.8 s |
+| C `cgmlst-dists` 0.6.0, `-j 80`† | 97.0 s |
+| this tool, CPU (80 cores)† | **93.2 s** |
+| this tool, CPU + `--dedup`, clonal data* | **63.8 s** |
+| [cgmlst-dists-rs](https://github.com/genpat-it/cgmlst-dists-rs), 80 cores† | 5.8 s |
+
+† re-measured on 2026-11-02 on the same machine and dataset, best of two on an
+otherwise idle box (C 0.6.0 is sensitive to other load: 97-324 s over four
+runs). C 0.6.0 (February 2026) added OpenMP multithreading, which closes most of
+the gap that the earlier single-threaded comparison showed.
 
 \* same 20,000 samples but only 2,000 distinct profiles, as is typical of
 surveillance data. `--dedup` is exact: the output is byte-identical.
