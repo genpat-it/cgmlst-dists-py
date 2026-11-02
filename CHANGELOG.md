@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.8] - 2026-11-02
 
 ### Fixed
 - **chewBBACA hashed profiles (CRC32 allele ids) were read wrong.** Alleles were

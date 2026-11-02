@@ -21,7 +21,7 @@ import warnings
 # Suppress pandas warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-VERSION = "0.1.7"
+VERSION = "0.1.8"
 
 # numba is imported lazily. Importing it costs ~0.15s of startup on every run,
 # but the default CPU path computes with numpy and never needs it: only --gpu
