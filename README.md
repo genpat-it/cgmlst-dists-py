@@ -8,8 +8,11 @@
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Bioconda](https://img.shields.io/conda/vn/bioconda/cgmlst-dists-py.svg)](https://bioconda.github.io/recipes/cgmlst-dists-py/README.html)
 [![Bioconda downloads](https://img.shields.io/conda/dn/bioconda/cgmlst-dists-py.svg)](https://anaconda.org/bioconda/cgmlst-dists-py)
+[![Website](https://img.shields.io/badge/website-genpat--it.github.io-3550c4)](https://genpat-it.github.io/cgmlst-dists-py/)
 
 A high-performance Python port of [`cgmlst-dists`](https://github.com/tseemann/cgmlst-dists) by Torsten Seemann, for calculating pairwise Hamming distances in cgMLST data.
+
+**Website:** https://genpat-it.github.io/cgmlst-dists-py/
 
 > **Independent port.** This is not the original tool and is not affiliated with or endorsed by its author. `cgmlst-dists` is GPL-3.0, and so is this port; the default output is byte-identical to it.
 
