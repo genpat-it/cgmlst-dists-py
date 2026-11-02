@@ -277,23 +277,41 @@ def process_chunk(chunk_data, skip_input_replacements, missing_char):
     # surfaced as a cryptic "zero-size array to reduction operation maximum"
     # for a header-only input.
     if chunk_data.empty:
-        return chunk_data.astype(np.int32)
+        return chunk_data.astype(np.int64)
     # Fast path: if every column is already numeric (no 'INF-'/missing text
     # forced a string/object dtype), skip all string processing entirely.
     if chunk_data.dtypes.map(pd.api.types.is_numeric_dtype).all():
-        return chunk_data.fillna(0).astype(np.int32)
+        return chunk_data.fillna(0).astype(np.int64)
     arr = chunk_data.to_numpy(dtype='U')  # single 2D unicode array
     if not skip_input_replacements:
         # Strip a single leading chewBBACA 'INF-' prefix, matching the original
         # anchored regex `^INF-` exactly (count=1 removes only the first
         # occurrence, so a malformed 'INF-INF-x' stays non-numeric -> 0).
         arr = np.char.replace(arr, 'INF-', '', 1)
-    # Missing char -> '0'
-    arr[arr == missing_char] = '0'
-    # One vectorized numeric conversion over the whole block; non-numeric -> 0
-    flat = pd.to_numeric(arr.ravel(), errors='coerce')
-    result = np.nan_to_num(np.asarray(flat, dtype=np.float64), nan=0.0).reshape(arr.shape).astype(np.int32)
+    # Missing char and anything that is not a plain non-negative integer -> '0'
+    # (chewBBACA classes, '*N' novel alleles, NaN), then one exact integer
+    # conversion. Alleles are int64: chewBBACA hashed profiles use CRC32 ids up
+    # to 2^32-1, which used to go through float64 -> int32 and all collapse to
+    # INT32_MIN, making different hashes compare equal.
+    arr = np.char.strip(arr)
+    arr[(arr == missing_char) | ~np.char.isdigit(arr)] = '0'
+    result = arr.astype(np.int64)
     return pd.DataFrame(result, index=index, columns=columns)
+
+def compact_allele_ids(data):
+    """Return `data` as int32. Loci holding allele ids beyond int32 (e.g. the
+    CRC32 hashes of chewBBACA hashed profiles) are re-encoded to dense per-locus
+    ids 1..k, 0 staying missing. Distances only depend on equality within a
+    locus, so the matrix is unchanged, and the kernels keep their int32 input."""
+    values = data.to_numpy(dtype=np.int64)
+    big = np.flatnonzero(values.max(axis=0) > np.iinfo(np.int32).max) if values.size else []
+    if len(big) == 0:
+        return data.astype(np.int32)
+    values = values.copy()
+    for k in big:
+        uniq, codes = np.unique(values[:, k], return_inverse=True)
+        values[:, k] = codes.ravel() + (0 if uniq[0] == 0 else 1)
+    return pd.DataFrame(values.astype(np.int32), index=data.index, columns=data.columns)
 
 def estimate_file_size(file_path):
     """Get file size in bytes."""
@@ -315,7 +333,7 @@ def count_lines(file_path):
 
 def pyarrow_load(file_path, input_sep, skip_input_replacements, missing_char, silent=False):
     """Optional fast loader: do the read + numeric conversion with Arrow compute
-    (multithreaded C++). Returns a numeric int32 DataFrame identical to what the
+    (multithreaded C++). Returns a numeric int64 DataFrame identical to what the
     pandas path produces, or None if pyarrow is unavailable / anything goes
     wrong (caller then falls back to the pandas path). Only used when no
     completeness filter is requested."""
@@ -336,7 +354,7 @@ def pyarrow_load(file_path, input_sep, skip_input_replacements, missing_char, si
         names = tbl.column_names
         index = tbl.column(0).cast(pa.string()).to_pylist()
         loci = names[1:]
-        arr = np.empty((len(index), len(loci)), dtype=np.int32)
+        arr = np.empty((len(index), len(loci)), dtype=np.int64)
         for j, name in enumerate(loci):
             c = tbl.column(name)
             if pa.types.is_string(c.type) or pa.types.is_large_string(c.type):
@@ -348,9 +366,9 @@ def pyarrow_load(file_path, input_sep, skip_input_replacements, missing_char, si
                 # (matches pandas to_numeric(errors='coerce').fillna(0)).
                 c = pc.if_else(pc.equal(c, missing_char), '0', c)
                 c = pc.if_else(pc.match_substring_regex(c, '^[0-9]+$'), c, '0')
-                c = pc.cast(c, pa.int32())
+                c = pc.cast(c, pa.int64())
             else:
-                c = pc.cast(c, pa.int32(), safe=False)
+                c = pc.cast(c, pa.int64())
             arr[:, j] = c.to_numpy(zero_copy_only=False)
         if not silent:
             print(f"Data loaded (Arrow fast path): {arr.shape[0]} samples × {arr.shape[1]} loci")
@@ -378,8 +396,6 @@ def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replac
         # apply to this loader's output too; gating the fast path on their
         # absence (as earlier versions did) only made -L/-S needlessly slow.
         data = pyarrow_load(file_path, input_sep, skip_input_replacements, missing_char, silent)
-        if data is not None and data.size and int(data.to_numpy().max()) < 32767:
-            data = data.astype(np.int16)
 
         if data is None:
             # For small files, load directly for better performance
@@ -479,7 +495,7 @@ def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replac
         if not skip_input_replacements and not silent:
             print("Converting data to numeric format...")
         
-        data = data.astype(np.int32)
+        data = compact_allele_ids(data)
 
         # Downcast to the smallest int dtype that fits: the distance kernel is
         # memory-bandwidth bound, so int16 (when alleles fit) ~halves bandwidth.

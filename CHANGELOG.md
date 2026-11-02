@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **chewBBACA hashed profiles (CRC32 allele ids) were read wrong.** Alleles were
+  stored as int32: in a locus that also held text (`*N` novel alleles, chewBBACA
+  classes) every hash above 2^31-1 went through float64 -> int32 and became
+  INT32_MIN, so different hashes compared equal and distances collapsed (Listeria
+  Pasteur cgMLST, 2099 genomes: 857 instead of 1196 for one pair; 2.2 M pairs
+  affected). Alleles are now read as int64 by both loaders and loci with ids
+  beyond int32 are re-encoded to dense per-locus ids, so the kernels and their
+  memory use are unchanged. Output is md5-identical to the C cgmlst-dists and to
+  cgmlst-dists-rs on these data. Hashed inputs also load faster, because the
+  Arrow path no longer fails on them and falls back to pandas (5000 x 2000:
+  14.6 s -> 9.1 s).
+
+### Added
+- `benchmark/cgmlst-data-generator.py --hashed` writes CRC32 allele ids.
+
 ## [0.1.7] - 2026-07-30
 
 ### Added

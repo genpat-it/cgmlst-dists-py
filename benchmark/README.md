@@ -40,7 +40,7 @@ tqdm==4.67.1
 ```console
 $ python cgmlst-data-generator.py --help
 usage: cgmlst-data-generator.py [-h] [--samples SAMPLES] [--loci LOCI] [--missing MISSING]
-                               [--output OUTPUT] [--threads THREADS]
+                               [--output OUTPUT] [--threads THREADS] [--hashed]
 
 Generate synthetic cgMLST data for testing
 
@@ -51,6 +51,7 @@ options:
   --missing MISSING    Percentage of missing data (0-100) (default: 5.0)
   --output OUTPUT      Output file path (default: test_data.tsv)
   --threads THREADS    Number of threads to use (default: CPU count)
+  --hashed             Write CRC32 allele ids, as in chewBBACA hashed profiles
 ```
 
 ## Examples
@@ -59,6 +60,14 @@ options:
 
 ```bash
 python cgmlst-data-generator.py --samples 50 --loci 500 --output small_test.tsv
+```
+
+### Generate chewBBACA-style Hashed Profiles
+
+CRC32 allele ids up to 2^32-1, to check that a tool keeps hashes above 2^31:
+
+```bash
+python cgmlst-data-generator.py --samples 1000 --loci 1500 --hashed --output hashed_test.tsv
 ```
 
 ### Generate a Large Dataset with More Missing Data

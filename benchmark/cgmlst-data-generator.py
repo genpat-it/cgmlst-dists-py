@@ -13,6 +13,7 @@ import string
 import time
 import concurrent.futures
 import os
+import zlib
 from tqdm import tqdm
 
 def generate_sample_id(prefix="Sample_", length=8):
@@ -20,10 +21,14 @@ def generate_sample_id(prefix="Sample_", length=8):
     suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
     return f"{prefix}{suffix}"
 
-def generate_column_data(locus_name, n_samples, missing_percentage):
+def generate_column_data(locus_name, n_samples, missing_percentage, hashed=False):
     """Generate data for a single locus column."""
     # Generate random allele numbers (1-100)
     data = np.random.randint(1, 100, size=n_samples).astype(object)
+    if hashed:
+        # chewBBACA hashed profiles use CRC32 ids (0..2^32-1); about half are
+        # above 2^31, which exercises 32-bit signed overflow in the readers.
+        data = np.array([zlib.crc32(f"{locus_name}:{a}".encode()) for a in data], dtype=object)
     
     # Calculate how many values should be missing in this column
     n_missing = int((missing_percentage / 100) * n_samples)
@@ -35,7 +40,7 @@ def generate_column_data(locus_name, n_samples, missing_percentage):
     
     return locus_name, data
 
-def generate_test_data(n_samples, n_loci, missing_percentage=5, output_file="test_data.tsv", num_threads=None):
+def generate_test_data(n_samples, n_loci, missing_percentage=5, output_file="test_data.tsv", num_threads=None, hashed=False):
     """
     Generate synthetic cgMLST allelic profile data using multithreading.
     
@@ -69,7 +74,7 @@ def generate_test_data(n_samples, n_loci, missing_percentage=5, output_file="tes
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
         # Submit all column generation tasks
         future_to_locus = {
-            executor.submit(generate_column_data, locus, n_samples, missing_percentage): locus
+            executor.submit(generate_column_data, locus, n_samples, missing_percentage, hashed): locus
             for locus in locus_names
         }
         
@@ -133,10 +138,11 @@ def main():
     parser.add_argument("--missing", type=float, default=5.0, help="Percentage of missing data (0-100)")
     parser.add_argument("--output", default="test_data.tsv", help="Output file path")
     parser.add_argument("--threads", type=int, default=None, help="Number of threads to use (default: CPU count)")
+    parser.add_argument("--hashed", action="store_true", help="Write CRC32 allele ids, as in chewBBACA hashed profiles")
     
     args = parser.parse_args()
     
-    generate_test_data(args.samples, args.loci, args.missing, args.output, args.threads)
+    generate_test_data(args.samples, args.loci, args.missing, args.output, args.threads, args.hashed)
 
 if __name__ == "__main__":
     main()
