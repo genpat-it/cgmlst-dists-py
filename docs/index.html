@@ -55,9 +55,12 @@ footer{padding-block:28px 48px;color:var(--muted);font-size:.9rem}
 
 <header>
   <h1>cgmlst-dists<span>-py</span></h1>
-  <p class="lede">Pairwise cgMLST Hamming distance matrix from chewBBACA allele-call tables, in
-  Python. Byte-identical to the original <code>cgmlst-dists</code> by default, with
-  GrapeTree-compatible missing-data handlers, exact deduplication and optional GPU.</p>
+  <p class="lede">Pairwise cgMLST Hamming distance matrix from chewBBACA allele-call tables: a
+  Python port of <a href="https://github.com/tseemann/cgmlst-dists">cgmlst-dists</a> by Torsten
+  Seemann. Byte-identical to it by default, with GrapeTree-compatible missing-data handlers,
+  exact deduplication and optional GPU.</p>
+  <p class="small">Independent port, not affiliated with or endorsed by the original author.
+  cgmlst-dists is GPL-3.0, and so is this port.</p>
   <div class="links">
     <a class="primary" href="https://github.com/genpat-it/cgmlst-dists-py">GitHub</a>
     <a href="https://bioconda.github.io/recipes/cgmlst-dists-py/README.html">Bioconda</a>
@@ -127,7 +130,11 @@ cgmlst-dists.py -i chewbbaca.tab --stdout -m lower-tri</code></pre>
       <tr><td>ERR10109289 vs ERR10109291</td><td class="num">25</td><td class="num win">35</td></tr>
     </tbody>
   </table></div>
-  <p class="note">The fix is on <code>main</code> and ships in the next release. On these data the
+  <p><code>*N</code> novel alleles (inferred by chewBBACA but not added to the schema) are missing
+  by default, as in the original tool. <code>-N/--novel-as-allele</code> compares them as alleles
+  within each locus — on the pair above 1234 and 59 instead of 1196 and 35. Their numbering is local
+  to one chewBBACA run, so use it on tables from a single run.</p>
+  <p class="note">Fixed in 0.1.8. On these data the
   output is md5-identical to tseemann <code>cgmlst-dists</code> 0.6.0 and to cgmlst-dists-rs.</p>
 </section>
 

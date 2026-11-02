@@ -100,32 +100,23 @@ def complete_delete_cols(values):
 # Regression: the default must keep producing byte-identical output
 # --------------------------------------------------------------------------
 
-def is_lfs_pointer(path):
-    with open(path, "rb") as f:
-        return f.read(40).startswith(b"version https://git-lfs")
-
-
-@pytest.mark.parametrize("name", ["boring", "chewie", "100", "crc32"])
+@pytest.mark.parametrize("name", ["boring", "chewie", "100"])
 def test_default_output_matches_validation(name, tmp_path):
     """The reference outputs in validation/ were produced before the handlers
     existed, so this pins the default (-y 3) against silent behaviour changes."""
     src = REPO / "test" / f"{name}.tab"
     expected = REPO / "validation" / f"{name}_py.tab"
-    if is_lfs_pointer(src):
-        pytest.skip(f"{name}.tab is an unfetched Git LFS pointer")
     out = tmp_path / "out.tab"
     run_cli("-i", src, "-o", out, "-s")
     assert out.read_text() == expected.read_text()
 
 
-@pytest.mark.parametrize("name", ["boring", "chewie", "100", "crc32"])
+@pytest.mark.parametrize("name", ["boring", "chewie", "100"])
 def test_default_output_matches_c_implementation(name, tmp_path):
     """The default handler is the semantics of the original C cgmlst-dists, so
     the output must stay byte-identical to the C reference matrices."""
     src = REPO / "test" / f"{name}.tab"
     expected = REPO / "validation" / f"{name}_c.tab"
-    if is_lfs_pointer(src) or is_lfs_pointer(expected):
-        pytest.skip(f"{name} reference is an unfetched Git LFS pointer")
     out = tmp_path / "out.tab"
     run_cli("-i", src, "-o", out, "-s")
     assert out.read_text() == expected.read_text()

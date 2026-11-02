@@ -7,8 +7,8 @@
   stored as int32: in a locus that also held text (`*N` novel alleles, chewBBACA
   classes) every hash above 2^31-1 went through float64 -> int32 and became
   INT32_MIN, so different hashes compared equal and distances collapsed (Listeria
-  Pasteur cgMLST, 2099 genomes: 857 instead of 1196 for one pair; 2.2 M pairs
-  affected). Alleles are now read as int64 by both loaders and loci with ids
+  Pasteur cgMLST, 2099 genomes: 857 instead of 1196 for one pair; 2 196 306 of
+  2 201 851 pairs wrong). Alleles are now read as int64 by both loaders and loci with ids
   beyond int32 are re-encoded to dense per-locus ids, so the kernels and their
   memory use are unchanged. Output is md5-identical to the C cgmlst-dists and to
   cgmlst-dists-rs on these data. Hashed inputs also load faster, because the
@@ -16,7 +16,19 @@
   14.6 s -> 9.1 s).
 
 ### Added
+- `-N/--novel-as-allele`: count chewBBACA `*N` novel alleles (inferred, not added
+  to the schema) as alleles, compared within each locus. Default unchanged
+  (missing, as the C tool). On the Listeria data: 1234/59 instead of 1196/35,
+  md5-identical to `cgmlst-dists-rs -N`. The `*N` numbering is local to one
+  chewBBACA run, so use it only on tables from a single run.
 - `benchmark/cgmlst-data-generator.py --hashed` writes CRC32 allele ids.
+
+### Removed
+- **Git LFS.** The `crc32` dataset and its reference matrices (~333 MiB in LFS,
+  with a 1 GiB/month bandwidth quota) are gone. They are replaced by a hashed
+  table generated on the fly in the test suite (CRC32 ids, `INF-`, `*N`, `LNF`,
+  missing) and checked against an independent per-locus reference, which runs on
+  every CI job instead of only at release time.
 
 ## [0.1.7] - 2026-07-30
 

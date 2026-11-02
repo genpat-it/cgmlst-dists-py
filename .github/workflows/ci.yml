@@ -12,11 +12,6 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
-    inputs:
-      full_datasets:
-        description: "Also validate against the full-size crc32 dataset (~212 MiB of Git LFS traffic)"
-        type: boolean
-        default: false
 
 jobs:
   test:
@@ -44,21 +39,9 @@ jobs:
             numba: false
     name: py${{ matrix.python }}${{ matrix.pyarrow && ' + pyarrow' || '' }}${{ matrix.numba && ' + numba' || '' }}
     steps:
-      # Git LFS is deliberately not fetched by default. The crc32 dataset and its
-      # reference matrices total ~333 MiB, which every job of this matrix would
-      # download on every push, exhausting the 1 GiB/month LFS bandwidth quota
-      # immediately. The regression tests skip those files and still cover the
-      # same code paths via boring/chewie/100. The full-size dataset is always
-      # validated at release time, and on demand via the full_datasets input.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-
-      - name: Fetch full-size reference datasets from Git LFS
-        if: inputs.full_datasets
-        run: |
-          git lfs install
-          git lfs pull --include="test/crc32.tab,validation/crc32_c.tab,validation/crc32_py.tab"
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
@@ -89,7 +72,6 @@ jobs:
     # caught here instead of halfway through a release.
     runs-on: ubuntu-latest
     steps:
-      # No LFS needed: the smoke tests use the small boring.tab dataset.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false

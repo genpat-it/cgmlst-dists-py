@@ -9,7 +9,9 @@
 [![Bioconda](https://img.shields.io/conda/vn/bioconda/cgmlst-dists-py.svg)](https://bioconda.github.io/recipes/cgmlst-dists-py/README.html)
 [![Bioconda downloads](https://img.shields.io/conda/dn/bioconda/cgmlst-dists-py.svg)](https://anaconda.org/bioconda/cgmlst-dists-py)
 
-A high-performance Python implementation of `cgmlst-dists` for calculating pairwise Hamming distances in cgMLST data.
+A high-performance Python port of [`cgmlst-dists`](https://github.com/tseemann/cgmlst-dists) by Torsten Seemann, for calculating pairwise Hamming distances in cgMLST data.
+
+> **Independent port.** This is not the original tool and is not affiliated with or endorsed by its author. `cgmlst-dists` is GPL-3.0, and so is this port; the default output is byte-identical to it.
 
 ## Installation
 
@@ -129,6 +131,10 @@ options:
                         Size of chunks for reading/writing files (default: 1000)
   -n, --missing_char MISSING_CHAR
                         Character used for missing data (default: '-')
+  -N, --novel-as-allele Count chewBBACA '*N' novel alleles as alleles, compared
+                        within each locus (default: missing, as the original
+                        cgmlst-dists). The *N numbering is local to one
+                        chewBBACA run: use it only on tables from a single run
   -u, --dedup           Collapse identical profiles, compute distances over
                         the unique ones and expand the result. Exact, and much
                         faster on clonal data; costs a few percent when there
@@ -177,6 +183,13 @@ stderr; see [GPU support](#gpu-support) for what each install route provides.
 A locus with no call (`-` by default, see `-n/--missing_char`) is stored
 internally as `0`, so an allele literally named `0` cannot be represented. Note
 that any value that is not a positive integer is also treated as missing.
+
+Allele ids are read as 64-bit integers, so chewBBACA **hashed profiles** (CRC32
+ids up to 4 294 967 295) work. `*N` novel alleles (e.g. `*486`: inferred by
+chewBBACA but not added to the schema) are missing by default, as in the original
+C tool; `-N/--novel-as-allele` compares them as alleles within each locus, which
+recovers real differences. Their numbering is local to one chewBBACA run, so use
+`-N` only on a table from a single run.
 
 `-y/--missing-handler` selects how those absent calls affect the distance. The
 numbering follows GrapeTree's `-y` flag so the two tools can be compared:
@@ -444,7 +457,7 @@ built for a newer CUDA major version than it supports.
 ## Advantages Over Original Implementation
 
 1. **Scalability**: Efficiently handles much larger datasets through batch processing and memory optimization
-2. **Speed**: 7.6x faster than the C implementation on 20,000 samples with 80 cores, producing an identical matrix; up to 15x on clonal data with `--dedup`
+2. **Speed**: 7.6x faster than the single-threaded C implementation 0.4.0 on 20,000 samples with 80 cores, and on par with the multithreaded 0.6.0; `--dedup` is faster still on clonal data. For raw speed see [cgmlst-dists-rs](https://github.com/genpat-it/cgmlst-dists-rs)
 3. **Data Quality**: Advanced filtering options for more accurate analysis
 4. **Hardware Optimization**: Auto-detects and adapts to available system resources
 5. **More Output Options**: Supports binary format for very large matrices

@@ -265,7 +265,7 @@ def filter_samples_by_completeness(data: pd.DataFrame, missing_char: str, min_co
     filtered_df = data.loc[filtered_samples]
     return filtered_df, sample_stats
 
-def process_chunk(chunk_data, skip_input_replacements, missing_char):
+def process_chunk(chunk_data, skip_input_replacements, missing_char, novel_as_allele=False):
     """Process a data chunk for parallel loading.
 
     Vectorized numeric conversion: operate on the whole block as a single numpy
@@ -294,9 +294,26 @@ def process_chunk(chunk_data, skip_input_replacements, missing_char):
     # to 2^32-1, which used to go through float64 -> int32 and all collapse to
     # INT32_MIN, making different hashes compare equal.
     arr = np.char.strip(arr)
+    novel = novel_ids(arr) if novel_as_allele else None
     arr[(arr == missing_char) | ~np.char.isdigit(arr)] = '0'
     result = arr.astype(np.int64)
+    if novel is not None:
+        result = np.where(novel != 0, novel, result)
     return pd.DataFrame(result, index=index, columns=columns)
+
+def novel_ids(arr):
+    """`--novel-as-allele`: encode chewBBACA `*N` novel alleles (inferred, not
+    added to the schema) as -(N+1). Integer alleles are never negative, so a
+    novel allele never equals an integer one, and 0 stays missing. Other cells -> 0."""
+    arr = np.asarray(arr, dtype='U')
+    out = np.zeros(arr.shape, dtype=np.int64)
+    if arr.size == 0:
+        return out
+    tail = np.char.lstrip(arr, '*')
+    mask = np.char.startswith(arr, '*') & (np.char.str_len(arr) == np.char.str_len(tail) + 1) & np.char.isdigit(tail)
+    if mask.any():
+        out[mask] = -(tail[mask].astype(np.int64) + 1)
+    return out
 
 def compact_allele_ids(data):
     """Return `data` as int32. Loci holding allele ids beyond int32 (e.g. the
@@ -304,13 +321,16 @@ def compact_allele_ids(data):
     ids 1..k, 0 staying missing. Distances only depend on equality within a
     locus, so the matrix is unchanged, and the kernels keep their int32 input."""
     values = data.to_numpy(dtype=np.int64)
-    big = np.flatnonzero(values.max(axis=0) > np.iinfo(np.int32).max) if values.size else []
+    i32 = np.iinfo(np.int32)
+    big = np.flatnonzero((values.max(axis=0) > i32.max) | (values.min(axis=0) < i32.min)) if values.size else []
     if len(big) == 0:
         return data.astype(np.int32)
     values = values.copy()
     for k in big:
         uniq, codes = np.unique(values[:, k], return_inverse=True)
-        values[:, k] = codes.ravel() + (0 if uniq[0] == 0 else 1)
+        codes = codes.ravel() + 1
+        codes[values[:, k] == 0] = 0  # missing stays 0, every allele gets its own id
+        values[:, k] = codes
     return pd.DataFrame(values.astype(np.int32), index=data.index, columns=data.columns)
 
 def estimate_file_size(file_path):
@@ -331,7 +351,7 @@ def count_lines(file_path):
             # Fallback if memory-mapping fails
             return sum(1 for _ in f)
 
-def pyarrow_load(file_path, input_sep, skip_input_replacements, missing_char, silent=False):
+def pyarrow_load(file_path, input_sep, skip_input_replacements, missing_char, silent=False, novel_as_allele=False):
     """Optional fast loader: do the read + numeric conversion with Arrow compute
     (multithreaded C++). Returns a numeric int64 DataFrame identical to what the
     pandas path produces, or None if pyarrow is unavailable / anything goes
@@ -362,11 +382,15 @@ def pyarrow_load(file_path, input_sep, skip_input_replacements, missing_char, si
                     # Strip one leading 'INF-' (matches the anchored ^INF- regex)
                     c = pc.replace_substring(c, 'INF-', '', max_replacements=1)
                 c = pc.utf8_trim_whitespace(c)
+                novel = novel_ids(c.to_numpy(zero_copy_only=False)) if novel_as_allele else None
                 # Missing char -> '0'; anything not a plain integer -> '0'
                 # (matches pandas to_numeric(errors='coerce').fillna(0)).
                 c = pc.if_else(pc.equal(c, missing_char), '0', c)
                 c = pc.if_else(pc.match_substring_regex(c, '^[0-9]+$'), c, '0')
                 c = pc.cast(c, pa.int64())
+                if novel is not None:
+                    arr[:, j] = np.where(novel != 0, novel, c.to_numpy(zero_copy_only=False))
+                    continue
             else:
                 c = pc.cast(c, pa.int64())
             arr[:, j] = c.to_numpy(zero_copy_only=False)
@@ -381,7 +405,7 @@ def pyarrow_load(file_path, input_sep, skip_input_replacements, missing_char, si
 def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replacements: bool = False,
               min_locus_completeness: float = None, min_sample_completeness: float = None,
               missing_char: str = "-", chunk_size: int = 10000, io_threads: int = 4, 
-              silent: bool = False) -> tuple[Optional[pd.DataFrame], Optional[dict], Optional[dict]]:
+              silent: bool = False, novel_as_allele: bool = False) -> tuple[Optional[pd.DataFrame], Optional[dict], Optional[dict]]:
     """Load data with optimized I/O performance."""
     try:
         load_start = time.time()
@@ -395,7 +419,7 @@ def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replac
         # completeness filters below count zeros on the numeric frame, so they
         # apply to this loader's output too; gating the fast path on their
         # absence (as earlier versions did) only made -L/-S needlessly slow.
-        data = pyarrow_load(file_path, input_sep, skip_input_replacements, missing_char, silent)
+        data = pyarrow_load(file_path, input_sep, skip_input_replacements, missing_char, silent, novel_as_allele)
 
         if data is None:
             # For small files, load directly for better performance
@@ -404,7 +428,7 @@ def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replac
                     print("Small file detected, loading directly...")
             
                 data = pd.read_csv(file_path, sep=input_sep, index_col=0, low_memory=False)
-                data = process_chunk(data, skip_input_replacements, missing_char)
+                data = process_chunk(data, skip_input_replacements, missing_char, novel_as_allele)
             
                 if not silent:
                     print(f"Data loaded: {data.shape[0]} samples × {data.shape[1]} loci")
@@ -452,7 +476,7 @@ def load_data_optimized(file_path: str, input_sep: str = "\t", skip_input_replac
                 
                     # Submit chunks for processing
                     for i, chunk in enumerate(tqdm(chunk_reader, desc="Reading chunks", disable=silent)):
-                        futures.append(executor.submit(process_chunk, chunk, skip_input_replacements, missing_char))
+                        futures.append(executor.submit(process_chunk, chunk, skip_input_replacements, missing_char, novel_as_allele))
                 
                     # Collect processed chunks
                     for future in tqdm(futures, desc="Processing chunks", disable=silent):
@@ -1030,6 +1054,10 @@ def main():
         parser.add_argument("-M", "--max_memory_gb", type=float, default=default_memory_gb, help=f"Maximum memory to use in GB for distance calculation (default: {default_memory_gb})")
         parser.add_argument("-k", "--chunk_size", type=int, default=1000, help="Size of chunks for reading/writing files")
         parser.add_argument("-n", "--missing_char", default="-", help="Character used for missing data (default: '-')")
+        parser.add_argument("-N", "--novel-as-allele", action="store_true",
+                            help="Count chewBBACA '*N' novel alleles as alleles, compared within each locus "
+                                 "(default: missing, as the original cgmlst-dists). The *N numbering is local "
+                                 "to one chewBBACA run: use it only on tables from a single run")
         parser.add_argument("-u", "--dedup", action="store_true",
                           help="Collapse identical profiles, compute distances over the unique ones "
                                "and expand the result. Exact, and much faster on clonal data; costs "
@@ -1123,7 +1151,8 @@ def main():
         data, loci_stats, sample_stats = load_data_optimized(
             args.input, args.input_sep, args.skip_input_replacements,
             args.locus_completeness, args.sample_completeness,
-            args.missing_char, args.chunk_size, args.io_threads, args.silent
+            args.missing_char, args.chunk_size, args.io_threads, args.silent,
+            args.novel_as_allele,
         )
         load_end_time = time.time()
         load_time = load_end_time - load_start_time
